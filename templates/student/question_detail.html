@@ -1112,7 +1112,11 @@ public class Main {
       })
         .then(function(r) {
           clearTimeout(timeoutId);
-          if (!r.ok) throw new Error("Run failed with status " + r.status);
+          if (!r.ok) {
+            return r.json().catch(function() { return {}; }).then(function(body) {
+              throw new Error(body.error || ("Run failed with status " + r.status));
+            });
+          }
           return r.json();
         })
         .then(function(data) {
@@ -1181,7 +1185,11 @@ public class Main {
           body: JSON.stringify({ question: questionId, code: code, language_id: languageId, custom_input: customInput })
         })
         .then(r => {
-          if (!r.ok) throw new Error("Run failed: " + r.status);
+          if (!r.ok) {
+            return r.json().catch(() => ({})).then(body => {
+              throw new Error(body.error || ("Run failed: " + r.status));
+            });
+          }
           return r.json();
         })
         .then(data => {
@@ -1202,7 +1210,7 @@ public class Main {
         })
         .catch(err => {
           console.error(err);
-          outPre.textContent = "Failed to run. Please check your code.";
+          outPre.textContent = (err && err.message) || "Failed to run. Please check your code.";
           outPre.style.color = "#ef4444";
         })
         .finally(() => {

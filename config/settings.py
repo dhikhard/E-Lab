@@ -32,7 +32,19 @@ SECRET_KEY = _secret_key
 
 DEBUG = env("DEBUG", "false").lower() == "true"
 
-ALLOWED_HOSTS = ["*"]
+def _host_of(url):
+    from urllib.parse import urlparse
+    return urlparse(url).hostname or ""
+
+
+# Explicit hosts from ALLOWED_HOSTS, plus every host already trusted for CSRF
+# and BASE_URL, so existing deployments keep working without a wildcard.
+ALLOWED_HOSTS = sorted(
+    {h.strip() for h in env("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()}
+    | {_host_of(o) for o in env("CSRF_TRUSTED_ORIGINS", "").split(",") if _host_of(o.strip())}
+    | ({_host_of(env("BASE_URL", ""))} - {""})
+    | {"localhost", "127.0.0.1"}
+)
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()

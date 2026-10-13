@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import os
 import re
 import subprocess
@@ -24,9 +25,9 @@ from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.generic import CreateView
-from rest_framework import permissions, viewsets
+from rest_framework import mixins, permissions, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import Throttled
+from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied, Throttled
 from rest_framework.response import Response
 
 from .forms import (
@@ -61,6 +62,8 @@ from .services import (
 )
 from .tasks import evaluate_submission_task, generate_llm_hint_task
 from .hint_service import get_student_hints_for_question, generate_hint_for_submission, unlock_hint_for_question
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -911,7 +914,9 @@ def unlock_question_hint_api(request, question_id):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. Use POST."}, status=405)
 
-    question = get_object_or_404(Question, pk=question_id)
+    question = get_object_or_404(Question, pk=question_id, is_active=True)
+    if not student_can_access_question(request.user, question):
+        return JsonResponse({"success": False, "error": "This question is not assigned to you."}, status=403)
     initial_hints = get_student_hints_for_question(request.user, question)
     if not initial_hints["can_unlock_more"]:
         return JsonResponse({
@@ -990,7 +995,6 @@ def hint_status_api(request, question_id):
         kind = cache.get(f"elab_llm_kind_{question.id}_{next_tier}")
         if cached and kind != "diagnostic":
             result["llm_hint_available"] = True
-            result["llm_hint_text"] = cached
             result["hint_generation_status"] = "complete"
         else:
             # Check if a generation task is in-flight (lock exists)
@@ -1137,6 +1141,21 @@ def attendance_report(request):
     return render(request, "faculty/attendance.html", {"sessions": sessions})
 
 
+def student_can_access_question(user, question):
+    """Faculty-like users see everything; students only questions assigned to them."""
+    if user.is_faculty_like:
+        return True
+    return AssignedQuestion.objects.filter(assignment__student=user, question=question).exists()
+
+
+RUN_CODE_COOLDOWN_SECONDS = 3
+
+
+def can_run_code(user):
+    """Per-user cooldown for /api/run/ so one client can't monopolise sandbox capacity."""
+    return cache.add(f"run-code:{user.id}", 1, RUN_CODE_COOLDOWN_SECONDS)
+
+
 def can_submit(student, question):
     key = f"submit:{student.id}:{question.id}"
     last = cache.get(key)
@@ -1205,6 +1224,13 @@ def run_code_api(request):
         question = get_object_or_404(Question, id=question_id, is_active=True)
     except Exception:
         return JsonResponse({"error": "Question not found"}, status=404)
+
+    if not student_can_access_question(request.user, question):
+        return JsonResponse({"error": "This question is not assigned to you."}, status=403)
+    if not can_run_code(request.user):
+        return JsonResponse(
+            {"error": f"Please wait {RUN_CODE_COOLDOWN_SECONDS} seconds between runs."}, status=429
+        )
 
     # Inject missing headers based on starter code
     from .sandbox import inject_headers as _inject_headers
@@ -2453,7 +2479,14 @@ def notifications_mark_all_read(request):
     return redirect("notifications_list")
 
 
-class SubmissionViewSet(viewsets.ModelViewSet):
+class SubmissionViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    # Submissions are immutable once created: no update/partial_update/destroy,
+    # otherwise a student could re-point an accepted submission at another question.
     serializer_class = SubmissionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -2468,6 +2501,8 @@ class SubmissionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         question = serializer.validated_data["question"]
+        if not question.is_active or not student_can_access_question(self.request.user, question):
+            raise DRFPermissionDenied("This question is not assigned to you.")
         if not can_submit(self.request.user, question):
             raise Throttled(detail="Please wait 10 seconds before submitting again.")
         session_key = f"violations_{self.request.user.id}_{question.id}"
@@ -2624,7 +2659,7 @@ def student_lab_record(request):
     # Get the latest accepted submission per question
     latest_subs = {}
     for sub in all_subs:
-        latest_subs[sub.question_id] = sub
+        latest_subs.setdefault(sub.question_id, sub)
         
     module_data = []
     for module in modules:
@@ -3015,8 +3050,9 @@ def faculty_agent_generate_api(request):
             "question": result,
             "references": ref_summary
         })
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+    except Exception:
+        logger.exception("Faculty agent question generation failed")
+        return JsonResponse({"error": "Question generation failed. Please try again."}, status=500)
 
 
 @login_required

@@ -36,7 +36,7 @@ echo "🗃️  Running database migrations..."
 docker compose exec web python manage.py migrate
 
 echo "👤 Creating HOD user..."
-docker compose exec web python manage.py create_hod
+docker compose exec web python manage.py create_hod --password "$HOD_PASSWORD"
 
 echo "📚 Importing questions..."
 docker compose exec web python manage.py import_questions

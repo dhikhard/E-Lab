@@ -140,6 +140,15 @@ class HintSystemTests(TestCase):
 
     @patch("core.hint_service._enqueue_llm_generation")
     def test_unlock_question_hint_api(self, _mock_enqueue):
+        from django.utils import timezone
+        from .models import AssignedQuestion, ModuleQuestionAssignment
+        # Hint unlock is gated to questions assigned to the student (audit F16).
+        assignment = ModuleQuestionAssignment.objects.create(
+            student=self.student, module=self.module, difficulty=self.question.difficulty
+        )
+        AssignedQuestion.objects.create(
+            assignment=assignment, question=self.question, order=1, unlocked_at=timezone.now()
+        )
         self.client.force_login(self.student)
 
         # Unlock Hint 1

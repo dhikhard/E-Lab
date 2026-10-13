@@ -282,7 +282,7 @@ docker compose exec app python manage.py auto_advance_semesters --dry-run
 ### Create Users
 ```bash
 # Create dedicated HOD user
-docker compose exec app python manage.py create_hod
+docker compose exec app python manage.py create_hod --password '<choose-a-strong-password>'
 
 # Create Django Superuser (for admin panel)
 docker compose exec app python manage.py createsuperuser
