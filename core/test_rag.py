@@ -122,9 +122,10 @@ class RetrievalTests(TestCase):
 
 def good_candidate(chunk_ref, **overrides):
     q = {
-        "title": "Balanced Bracket Checker",
-        "statement": "Read a string of brackets and print YES if every opening bracket is closed by the matching bracket "
-                     "in the right order, otherwise print NO.",
+        "title": "Editor Bracket Highlighter",
+        "statement": "A code editor wants to warn about unmatched brackets. Read one line containing only round, square "
+                     "and curly brackets and print YES when each one pairs up with a partner of the same kind in a "
+                     "properly nested way, otherwise print NO.",
         "input_format": "One line with the bracket string.",
         "output_format": "YES or NO.",
         "constraints": ["1 <= length <= 10^4"],
@@ -196,6 +197,38 @@ class GenerationPipelineTests(TestCase):
         self.assertEqual(result["accepted"], [])
         self.assertTrue(all(r["stage"] == "execution" for r in result["rejected"]))
 
+    def test_wrong_hidden_output_is_corrected_from_execution(self, _e):
+        cand = good_candidate(self.ref)
+        cand["tests"][4]["expected_output"] = "YES"  # hidden test, model guessed wrong (']' is unbalanced)
+        result = self.run_pipeline([cand])
+        self.assertEqual(len(result["accepted"]), 1)
+        q = result["accepted"][0]
+        self.assertEqual(q["tests"][4]["expected_output"], "NO")
+        self.assertEqual(q["validation"]["hidden_outputs_corrected"], 1)
+
+    def test_mostly_wrong_hidden_outputs_rejected(self, _e):
+        cand = good_candidate(self.ref)
+        for t in cand["tests"][2:]:
+            t["expected_output"] = "MAYBE"
+        result = self.run_pipeline([cand, cand])
+        self.assertEqual(result["accepted"], [])
+        self.assertIn("disagreed", result["rejected"][0]["detail"])
+
+    def test_retry_sends_compact_feedback_not_previous_answer(self, _e):
+        bad = good_candidate("D999C9")
+        calls = []
+
+        def fake(messages):
+            calls.append(messages)
+            return (json.dumps(bad if len(calls) == 1 else good_candidate(self.ref)), {})
+
+        with patch("core.rag.generate._call_model", side_effect=fake):
+            generate.generate_questions("stack", difficulty="easy", language="python", count=1, runner=python_runner)
+        retry = calls[1]
+        self.assertFalse(any(m["role"] == "assistant" for m in retry))
+        self.assertIn("was rejected", retry[-1]["content"])
+        self.assertEqual(retry[:2], calls[0][:2])
+
     def test_wrong_language_rejected(self, _e):
         c_code = "#include <stdio.h>\nint main(void){ return 0; }\n"
         result = self.run_pipeline([good_candidate(self.ref, reference_solution=c_code)] * 2)
@@ -220,6 +253,16 @@ class GenerationPipelineTests(TestCase):
         )
         result = self.run_pipeline([off_topic, off_topic])
         self.assertEqual(result["rejected"][0]["stage"], "grounding")
+
+    def test_restated_source_problem_rejected(self, _e):
+        copied = good_candidate(
+            self.ref, title="Balanced Brackets",
+            statement="Given a string of brackets, decide whether every opening bracket is closed by the matching "
+                      "bracket in the right order. Brackets are round, square and curly.",
+        )
+        result = self.run_pipeline([copied, copied])
+        self.assertEqual(result["accepted"], [])
+        self.assertEqual(result["rejected"][0]["stage"], "novelty")
 
     def test_duplicate_of_existing_question_rejected(self, _e):
         cand = good_candidate(self.ref)

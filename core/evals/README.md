@@ -63,3 +63,43 @@ Summary: of 13 LLM hint sets, **6 clean, 5 partially reveal the method at level 
 2. A 7–8B model would likely leak less but roughly halves throughput; it could not be tested on this 8 GB dev box.
    The 16 GB server can hold one (~5–6 GB) if the compose memory budget is adjusted.
 3. Keep `HINTS_USE_STUDENT_CODE=false` unless CPU budget allows per-student generations.
+
+---
+
+# RAG question generation evaluation (T7) — partial
+
+Run on the 8 GB dev laptop (i7‑11800H, CPU only, `qwen3.5:4b`, `QUESTION_GEN_CTX=4096`, real Docker sandbox),
+one source document per run with retrieval restricted to that document. The run was stopped before completion
+because the laptop could not hold the model, Postgres and the sandbox at once; **the C++ and all "hard" runs are
+missing** and must be re-run on the 16 GB server:
+
+```bash
+docker compose exec worker-llm python manage.py eval_question_gen \
+  --doc 04_Stack/01_valid_parentheses.md:python \
+  --doc 07_Binary_Search/01_binary_search_classic.md:c \
+  --doc 09_HashMap_Hashing/02_longest_consecutive_sequence.md:java \
+  --doc 20_Math_Number_Theory/02_gcd_extended_euclidean.md:cpp \
+  --count 3 --difficulty mixed --out question_eval.json
+```
+
+| Source | Lang | Difficulty | Result | Time |
+|---|---|---|---|---|
+| Valid Parentheses | Python | easy | accepted — “Balanced Bracket Sequence Validator” | 141 s |
+| Valid Parentheses | Python | medium | accepted — “Bracket Sequence Validation with Nested Types” | 177 s |
+| Binary Search | C | easy | **rejected** ×2 — 44% copied from source; sample output wrong (`-1` vs `0`) | 320 s |
+| Binary Search | C | medium | accepted — “Find First and Last Position of Element in Sorted Array” | 206 s |
+| Longest Consecutive Seq. | Java | easy | accepted — “Find the Longest Run of Consecutive Numbers” | 188 s |
+| Longest Consecutive Seq. | Java | medium | accepted — “Maximum Gap Between Distinct Values” | 181 s |
+| any | any | hard | not measured (aborted: dev-machine memory) | — |
+| GCD | C++ | easy/medium | not measured | — |
+
+Accepted means: schema valid, citations exist, grounded, not a copy of the source, correct language, reference
+solution reproduced both worked samples in the sandbox, starter code compiles. 5/6 completed runs produced a
+question (2–3.5 minutes each on CPU). Not yet graded by a person for novelty/quality: two accepted titles are close
+to well-known problems (the stack ones restate the source idea with new wording; “Find First and Last Position” is a
+known LeetCode problem), which is what the faculty review step is for.
+
+Earlier runs (before the final validation rules) showed the main failure mode is **self-inconsistency**: the model's
+expected outputs disagree with its own reference solution (6 of 8 rejected attempts). The pipeline now requires the two
+worked samples to match exactly, takes hidden-test outputs from executing the reference solution, and rejects a
+candidate if more than half its hidden outputs were wrong.
