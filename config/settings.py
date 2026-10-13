@@ -200,6 +200,10 @@ CELERY_BEAT_SCHEDULE = {
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", env("REDIS_URL", "redis://elab-redis:6379/1"))
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", "redis://elab-redis:6379/2")
 CELERY_TASK_ALWAYS_EAGER = env("CELERY_TASK_ALWAYS_EAGER", "false").lower() == "true"
+# Run "Run code" requests on a Celery worker instead of the web container, so
+# the web container doesn't need the Docker socket (audit F2).
+SANDBOX_VIA_WORKER = env("SANDBOX_VIA_WORKER", "true").lower() == "true"
+
 # CPU-only LLM work gets its own queue so a burst of hint/question generation
 # can never delay submission judging (see docker-compose worker-llm service).
 CELERY_TASK_ROUTES = {

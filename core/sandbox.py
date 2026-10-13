@@ -42,6 +42,15 @@ HOST_SANDBOX_DIR = _detect_host_sandbox_dir(SANDBOX_DIR)
 # impossible to appear in normal program output.
 _COMPILE_ERROR_MARKER = "__ELAB_COMPILE_ERROR__"
 
+# Output caps enforced inside the container, so a print loop can't exhaust the
+# memory of the web/Celery process reading it. Exceeding the stdout cap kills
+# the program with SIGPIPE (reported as a runtime error).
+STDOUT_LIMIT_BYTES = 1_000_000
+STDERR_LIMIT_BYTES = 64_000
+SANDBOX_USER = os.environ.get("DOCKER_SANDBOX_USER", "65534:65534")  # nobody
+COMPILER_MEMORY_MB = 384
+NATIVE_RUNTIME_OVERHEAD_KB = 16 * 1024  # libc/loader mappings on top of the question's limit
+
 
 # Each language maps to:
 #   - monaco:    the Monaco editor language id used in the browser
@@ -133,7 +142,8 @@ def _write_file_safe(path, content):
     return encoded
 
 
-def _build_inner_script(lang_config, source_filename, class_name, time_limit, source_code=None, stdin=""):
+def _build_inner_script(lang_config, source_filename, class_name, time_limit, source_code=None, stdin="",
+                        program_memory_kb=None):
     """
     Build the sh -c script that runs inside the container. It compiles first
     (emitting our marker on failure), then runs the program under `timeout`.
@@ -180,11 +190,23 @@ def _build_inner_script(lang_config, source_filename, class_name, time_limit, so
     # Use timeout to enforce time limits. Fall back to stdbuf for unbuffered output.
     # Pick stdbuf-if-available FIRST — chaining with || would re-run the whole
     # program a second time whenever the first attempt exits non-zero.
+    # Native programs get the question's memory limit as an address-space cap,
+    # applied after compiling so the compiler itself isn't constrained by it.
+    if program_memory_kb:
+        parts.append(f"ulimit -v {int(program_memory_kb)}")
+
+    # stdout is capped with head; the program's own exit status is kept in
+    # /tmp/rc so TLE (124) and runtime errors are still detected.
     parts.append(
-        f"if command -v stdbuf >/dev/null 2>&1; then "
-        f"stdbuf -o0 timeout {time_limit}s {quoted_run} < input.txt; "
-        f"else timeout {time_limit}s {quoted_run} < input.txt; fi"
+        "{ if command -v stdbuf >/dev/null 2>&1; then "
+        f"stdbuf -o0 timeout {time_limit}s {quoted_run} < input.txt 2>/tmp/stderr.txt; "
+        f"else timeout {time_limit}s {quoted_run} < input.txt 2>/tmp/stderr.txt; fi; "
+        "echo $? > /tmp/rc; "
+        f"}} | head -c {STDOUT_LIMIT_BYTES}"
     )
+    parts.append(f"head -c {STDERR_LIMIT_BYTES} /tmp/stderr.txt >&2")
+    # Fail closed: a missing/empty status (e.g. /tmp filled up) is an error, never success.
+    parts.append('rc=$(cat /tmp/rc 2>/dev/null); exit "${rc:-1}"')
 
     return "; ".join(parts)
 
@@ -200,7 +222,14 @@ def run_code(language, source_code, stdin="", expected_output="",
       6  Compilation Error, 11 Runtime Error
     """
     lang_key = LANGUAGES.get(language, LANGUAGES["c"])
+    # The container must also fit the compiler: g++ needs ~250 MB for
+    # <bits/stdc++.h>, which used to fail with "cc1plus killed" at the default
+    # 125 MB question limit. For C/C++ the question limit is enforced on the
+    # program with `ulimit -v` instead; Java/Python keep the container limit.
+    native = language in ("c", "cpp")
     memory_limit_mb = max(16, int(memory_limit_kb) // 1024)
+    if native:
+        memory_limit_mb = max(memory_limit_mb, COMPILER_MEMORY_MB)
     run_id = str(uuid.uuid4())
     tmpdir = os.path.join(SANDBOX_DIR, run_id)
     host_sandbox_dir = _detect_host_sandbox_dir(SANDBOX_DIR)
@@ -228,7 +257,10 @@ def run_code(language, source_code, stdin="", expected_output="",
         except OSError:
             pass
 
-        inner_script = _build_inner_script(lang_key, source_filename, class_name, time_limit, source_code, stdin)
+        inner_script = _build_inner_script(
+            lang_key, source_filename, class_name, time_limit, source_code, stdin,
+            program_memory_kb=(int(memory_limit_kb) + NATIVE_RUNTIME_OVERHEAD_KB) if native else None,
+        )
 
         # Write the inner script to a file in the container's tmpdir
         script_path = os.path.join(tmpdir, "run_script.sh")
@@ -249,8 +281,15 @@ def run_code(language, source_code, stdin="", expected_output="",
             "--pids-limit", "64",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges:true",
+            "--user", SANDBOX_USER,
+            "--read-only",
+            "--ulimit", "nofile=256:256",
+            # Any single file (incl. captured stderr) is capped below the 50 MB /tmp size,
+            # so the program is killed (SIGXFSZ) before /tmp can fill up.
+            "--ulimit", "fsize=16777216:16777216",
             "--tmpfs", "/tmp:rw,nosuid,exec,size=50m",
-            "-v", f"{host_tmpdir}:/box:rw",
+            # Read-only: user code can't write to the host disk through /box.
+            "-v", f"{host_tmpdir}:/box:ro",
             SANDBOX_IMAGE,
             "/box/run_script.sh",
         ]

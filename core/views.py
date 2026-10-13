@@ -42,7 +42,7 @@ from .forms import (
 )
 from .models import SubQuestion
 from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, PointsLedger, ProctoringEvent, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
-from .sandbox import run_code as sandbox_run_code, language_for_id, inject_headers
+from .sandbox import run_code as _local_run_code, language_for_id, inject_headers
 from .serializers import ProgressSerializer, QuestionSerializer, SubmissionSerializer
 from .services import (
     certificate_eligible,
@@ -1134,6 +1134,21 @@ def student_can_access_question(user, question):
         return True
     return AssignedQuestion.objects.filter(assignment__student=user, question=question).exists()
 
+def sandbox_run_code(language, source_code, stdin="", expected_output="", time_limit=2.0, memory_limit_kb=128000):
+    """Run code in the sandbox, via a Celery worker unless SANDBOX_VIA_WORKER is off."""
+    from django.conf import settings as dj_settings
+
+    if not dj_settings.SANDBOX_VIA_WORKER:
+        return _local_run_code(language, source_code=source_code, stdin=stdin, expected_output=expected_output,
+                               time_limit=time_limit, memory_limit_kb=memory_limit_kb)
+    from .tasks import run_code_task
+
+    result = run_code_task.apply_async(
+        args=[language, source_code, stdin, expected_output, time_limit, memory_limit_kb], expires=60
+    )
+    return result.get(timeout=time_limit + 30, propagate=True, disable_sync_subtasks=False)
+
+
 
 RUN_CODE_COOLDOWN_SECONDS = 3
 
@@ -1169,6 +1184,15 @@ def check_sandbox():
             capture_output=True,
             text=True,
             timeout=3,
+    from django.conf import settings as dj_settings
+
+    if dj_settings.SANDBOX_VIA_WORKER:
+        # The sandbox lives on the Celery workers; healthy if at least one answers.
+        try:
+            from config.celery import app as celery_app
+            return bool(celery_app.control.ping(timeout=1.0))
+        except Exception:
+            return False
         )
         return result.returncode == 0
     except Exception:

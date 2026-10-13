@@ -5,12 +5,12 @@ services:
     restart: unless-stopped
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 16 --threads 4 --worker-class gthread --max-requests 2000 --max-requests-jitter 200 --timeout 120 --keep-alive 5 --log-level info --preload
     env_file: .env
+    # No Docker socket here (audit F2): code runs on the Celery workers, so a
+    # compromise of the web process doesn't hand out root on the host.
     volumes:
       - .:/app
       - media:/app/media
       - staticfiles:/app/staticfiles
-      - ./sandbox_data:/var/elab-sandbox
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - elab-db
       - elab-redis
@@ -20,14 +20,14 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Memory budget for the 16 GB, CPU-only server (audit F10) — see README "Capacity".
     deploy:
       resources:
         limits:
-          cpus: "8"
-          memory: 6G
+          cpus: "6"
+          memory: 2560M
         reservations:
-          cpus: "4"
-          memory: 4G
+          memory: 1G
     networks:
       - elab-network
 
@@ -35,7 +35,9 @@ services:
     build: .
     container_name: elab-worker
     restart: unless-stopped
-    command: celery -A config worker -Q celery -l info --concurrency 32 --pool=prefork --max-tasks-per-child 200 --max-memory-per-child 512000
+    # 12 concurrent judge/run jobs: each sandbox container gets 0.5 CPU, so 12 saturate
+    # an 8-core i7; 32 only queued inside Docker and multiplied worst-case memory.
+    command: celery -A config worker -Q celery -l info --concurrency 12 --pool=prefork --max-tasks-per-child 200 --max-memory-per-child 512000
     env_file: .env
     volumes:
       - .:/app
@@ -49,8 +51,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "8"
-          memory: 4G
+          cpus: "2"
+          memory: 2G
     networks:
       - elab-network
 
@@ -109,6 +111,10 @@ services:
     command: postgres -c max_connections=500 -c shared_buffers=256MB -c work_mem=4MB -c maintenance_work_mem=64MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     networks:
       - elab-network
     healthcheck:
@@ -125,6 +131,10 @@ services:
     command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --timeout 300 --tcp-keepalive 60
     volumes:
       - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - elab-network
     healthcheck:
@@ -150,19 +160,21 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 512M
+          memory: 256M
     networks:
       - elab-network
 
+  # CPU-only inference (no GPU on the server). One generation at a time: on a
+  # CPU, parallel requests split the same cores and every request gets slower.
+  # Holds the hint/question model (qwen3.5:4b, ~3.5 GB) + nomic-embed-text (~0.4 GB).
   ollama:
     image: ollama/ollama:latest
     container_name: elab-ollama
     restart: unless-stopped
     environment:
       - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_NUM_PARALLEL=8
+      - OLLAMA_NUM_PARALLEL=1
       - OLLAMA_MAX_LOADED_MODELS=2
-      - OLLAMA_GPU_LAYERS=-1
     volumes:
       - ollama_data:/root/.ollama
     networks:
@@ -170,30 +182,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "8"
-          memory: 6G
+          cpus: "6"
+          memory: 5G
         reservations:
-          cpus: "4"
-          memory: 3G
-
-  ollama-replica2:
-    image: ollama/ollama:latest
-    container_name: elab-ollama-replica2
-    restart: unless-stopped
-    environment:
-      - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_NUM_PARALLEL=8
-      - OLLAMA_MAX_LOADED_MODELS=1
-      - OLLAMA_GPU_LAYERS=-1
-    volumes:
-      - ollama_data2:/root/.ollama
-    networks:
-      - elab-network
-    deploy:
-      resources:
-        limits:
-          cpus: "4"
-          memory: 3G
+          memory: 4G
 
 volumes:
   postgres_data:
@@ -201,7 +193,6 @@ volumes:
   staticfiles:
   redis_data:
   ollama_data:
-  ollama_data2:
 
 networks:
   elab-network:

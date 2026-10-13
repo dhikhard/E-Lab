@@ -13,6 +13,15 @@ def evaluate_submission_task(submission_id):
     return sub.pk if sub else submission_id
 
 
+@app.task(soft_time_limit=60, time_limit=70)
+def run_code_task(language, source_code, stdin="", expected_output="", time_limit=2.0, memory_limit_kb=128000):
+    """Execute code in the Docker sandbox on a worker (the web container has no Docker socket)."""
+    from .sandbox import run_code
+
+    return run_code(language, source_code=source_code, stdin=stdin, expected_output=expected_output,
+                    time_limit=time_limit, memory_limit_kb=memory_limit_kb)
+
+
 @app.task
 def generate_submission_hint_task(submission_id):
     from .models import Submission
