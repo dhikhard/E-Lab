@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load custom_filters %}
 {% load static %}
 {% block content %}
 <div id="fullscreen-toast" class="fullscreen-toast" role="status" aria-live="polite"></div>
@@ -337,7 +338,7 @@
       </div>
     </div>
 
-    <div class="prose-dark" style="font-size: 15px; margin-bottom: 20px;">{{ display_question.description|safe|linebreaks }}</div>
+    <div class="prose-dark" style="font-size: 15px; margin-bottom: 20px;">{{ display_question.description|safe_html|linebreaks }}</div>
 
     {% with sample_test_cases=display_question.test_cases.all|dictsort:"order" %}
       {% if sample_test_cases %}

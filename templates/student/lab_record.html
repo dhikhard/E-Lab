@@ -1,3 +1,4 @@
+{% load custom_filters %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -174,7 +175,7 @@
       {% for q_data in m_data.questions %}
         <div class="question-block">
           <div class="question-title">{{ forloop.counter }}. {{ q_data.question.title }}</div>
-          <div class="question-desc">{{ q_data.question.description|safe }}</div>
+          <div class="question-desc">{{ q_data.question.description|safe_html }}</div>
           
           {% with sample_cases=q_data.question.sample_cases %}
             {% for tc in sample_cases %}

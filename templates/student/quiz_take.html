@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load custom_filters %}
 {% block title %}{{ quiz.title }}{% endblock %}
 {% block content %}
 <section class="toolbar">
@@ -24,7 +25,7 @@
           <h3>Question {{ forloop.counter }} <span class="muted" style="font-size: 13px; font-weight: normal; margin-left: 8px;">({{ qq.points }} points)</span></h3>
         </div>
         <div class="prose-dark" style="margin-bottom: 20px; font-size: 15px;">
-          {{ qq.text|safe|linebreaks }}
+          {{ qq.text|safe_html|linebreaks }}
         </div>
         
         <div style="display: flex; flex-direction: column; gap: 12px;">
