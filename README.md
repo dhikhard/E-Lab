@@ -15,11 +15,11 @@
 - ✅ **Faculty & HOD Portals** — Create modules/questions, review submissions, manage certificate approvals
 - ✅ **Quizzes & Assignments** — Timed quizzes and take-home open-ended assignments
 - ✅ **LeetCode Integration** — Bulk import 1,500+ public problems with test cases from local dataset
-- ✅ **RAG Question Generator** — Faculty can generate custom questions offline using local DSA knowledge base (300+ problems, no LLM/GPU required)
+- ✅ **RAG Question Generator** — Faculty generate sandbox-validated questions from the DSA notes or their own uploaded material with a local CPU-only LLM; questions are saved for review before going live
 - ✅ **Semester Auto-Advance** — Students automatically advance semesters on Jan 1 and Jul 1 via Celery beat
 - ✅ **Course Access Control** — Courses unlock based on student semester (C→sem 1, Python/Java/Placement→sem 3, C++/Advanced Placement→sem 5)
-- ✅ **User-Friendly Proctoring System** — Debounced window blur and tab-switch detection, in-editor copy/paste enabled, graduated polite in-page notices, and fullscreen enforcement
-- ✅ **Question-Grounded AI Tutor Hints** — Automated theoretical principles, algorithmic blueprints ("Use this, use that"), and edge-case guidance capped at max 3 hints per question (100% offline & local, zero external API keys)
+- ✅ **Proctoring** — Tab-switch and fullscreen-exit detection stored server-side, in-editor copy/paste allowed, and a focus mode with a Read Problem panel that never triggers violations
+- ✅ **AI Tutor Hints** — Three progressive, language-aware hints per question from a local CPU-only LLM, checked for code/answer leaks (100% offline, no external API keys)
 - ✅ **Seamless In-Page Auto-Reveal** — Hints automatically reveal with a glowing Cyber Violet & Cyan animation immediately upon test evaluation without page refreshes
 - ✅ **Redis-backed Cache** — High-performance caching and session management for 400+ concurrent users
 
@@ -34,8 +34,8 @@
 - **Scheduler:** Celery Beat (`elab-beat`) for periodic tasks
 - **Execution Sandbox:** Custom isolated Docker container (`elab-sandbox`) supporting C, C++, Java, and Python
 - **Reverse Proxy:** Nginx (`elab-nginx`) with gzip compression and keepalive
-- **RAG Engine:** ChromaDB + Sentence Transformers for semantic search (local, offline)
-- **Local AI & Hint Engine:** Ollama (`elab-ollama` running `qwen2.5-coder:1.5b`) with topic-aware diagnostic engine fallback
+- **RAG Engine:** Structure-aware chunks + Ollama embeddings stored in PostgreSQL, hybrid semantic/keyword retrieval
+- **Local AI (CPU-only):** Ollama (`elab-ollama`, `qwen3.5:4b` + `nomic-embed-text`) on a dedicated `worker-llm` Celery queue, with deterministic fallbacks
 - **Frontend:** Responsive HTML5 templates + Monaco Editor + Cyber Violet styling & CSS animations
 
 ---
@@ -86,9 +86,14 @@ DOCKER_SANDBOX_IMAGE=elab-sandbox
 DOCKER_SANDBOX_DIR=/var/elab-sandbox
 HOST_SANDBOX_DIR=/home/nmamit/e_lab/E-Lab/sandbox_data
 
-# Local LLM / Progressive Hint System (Offline, no external API keys)
+# Local LLM (CPU-only, no external API keys) — see "AI Tutor Hints" for all options
 OLLAMA_URL=http://elab-ollama:11434/api/chat
-OLLAMA_MODEL=qwen2.5-coder:1.5b
+HINT_MODEL=qwen3.5:4b
+OLLAMA_THINK=false
+OLLAMA_NUM_THREAD=6
+
+# HOD account created by setup.sh / create_hod (no default password)
+HOD_PASSWORD=choose-a-strong-password
 
 # Email (optional - for certificate notifications)
 EMAIL_HOST=smtp.gmail.com
@@ -107,8 +112,9 @@ docker build -t elab-sandbox -f sandbox/Dockerfile sandbox/
 # 2. Start all services (Django, Postgres, Redis, Celery, Nginx, Ollama)
 docker compose up -d --build
 
-# 3. Pull the local coding model for offline tutor hints (one-time)
-docker compose exec ollama ollama pull qwen2.5-coder:1.5b
+# 3. Pull the CPU models (one-time) — see step 5
+docker compose exec ollama ollama pull qwen3.5:4b
+docker compose exec ollama ollama pull nomic-embed-text
 
 # 4. Wait for services to be healthy
 docker compose ps
@@ -138,13 +144,18 @@ docker compose exec app python manage.py enrich_test_cases
 docker compose exec app python manage.py seed_demo
 ```
 
-### 5. Setup RAG (Required for Question Generator)
+### 5. Pull the CPU models and build the question-generation index
+The server has no GPU; everything below runs on the CPU.
 ```bash
-# Ingest 300+ DSA questions into ChromaDB (one-time, may take a few minutes)
-docker compose exec app python manage.py rag_ingest
+# Hint + question-generation model (~3.4 GB) and embedding model (~0.3 GB)
+docker compose exec ollama ollama pull qwen3.5:4b
+docker compose exec ollama ollama pull nomic-embed-text
 
-# Generate a sample question
-docker compose exec app python manage.py generate_question --topic "two pointers" --difficulty easy
+# Chunk + embed the bundled DSA notes (~2 minutes on an 8-core i7)
+docker compose exec worker python manage.py rag_index
+
+# Optional: pre-generate tutor hints before a lab (~25 s per question per language)
+docker compose exec worker python manage.py pregenerate_hints --module-id <id>
 ```
 
 ### 6. Access the Application
@@ -297,130 +308,97 @@ print(f'Created: {u}')
 
 ---
 
-## 🤖 Offline Question Generator (RAG + Problem Adaptation)
+## 🤖 Question Generator (RAG + local LLM, CPU-only)
 
-Generate custom programming questions by adapting problems from the local DSA knowledge base (300+ problems from `data/DSA_Topics/`). **No internet, no LLMs, no GPUs required — everything runs locally inside Docker.**
+Faculty open the **AI Question Agent** drawer (bottom-right on any faculty page), pick a topic, language,
+difficulty (or *Mixed*) and how many questions, and optionally **upload their own notes** (`.md`, `.txt` or
+text-based `.pdf`, up to 5 MB). Generation runs as a background job on the `worker-llm` queue; the drawer
+polls and shows progress.
 
-### Setup RAG Database
+### Pipeline
+1. **Chunking** — documents are split by structure (headings, paragraphs, lists); fenced code blocks are never
+   split; ~1,200-character chunks with one-paragraph overlap.
+2. **Retrieval** — `nomic-embed-text` embeddings (stored with model + version; `rag_index` re-embeds stale chunks)
+   blended with a keyword score, then de-duplicated. On 20 labelled queries, precision@3 went from 0.37 (old keyword
+   matcher) to 0.68. An empty or stale index produces a clear error, never zero silent questions.
+3. **Generation** — one schema-constrained LLM call per question, with the retrieved chunks, topic, language,
+   explicit easy/medium/hard criteria and an output schema (statement, formats, constraints, starter code,
+   reference solution, 5–8 tests, citations).
+4. **Validation** — a candidate is discarded unless: the JSON matches the schema; every citation is a retrieved
+   chunk and the statement shares vocabulary with it; the code is in the requested language and the starter code
+   doesn't contain the solution; **the reference solution, run in the Docker sandbox, prints every expected
+   output** and the starter code compiles; and it isn't a near-duplicate (embedding similarity ≥ 0.92) of an
+   existing question. One retry with the failure fed back is allowed. A heuristic flags suspicious difficulty labels.
+5. **Review** — accepted questions are saved **inactive**. Faculty review and activate them from the question bank.
+
 ```bash
-# Ingest all 300+ DSA questions from the repository into ChromaDB (one-time)
-docker compose exec app python manage.py rag_ingest
+# CLI equivalents (also save inactive)
+docker compose exec worker python manage.py generate_question --topic "stack" --difficulty easy --language c --module-id 3
+docker compose exec worker python manage.py bulk_generate_questions --topics "stack,binary search" --difficulty medium --module-id 3
+# Evaluate on chosen source documents (writes everything for manual grading)
+docker compose exec worker python manage.py eval_question_gen --doc 04_Stack/01_valid_parentheses.md:python --count 3
 ```
-
-### Generate & Save a New Question
-```bash
-# Basic generation — generates question and saves it directly to the selected module
-docker compose exec app python manage.py generate_question --topic "dynamic programming" --difficulty medium --module "Dynamic Programming"
-
-# With custom instructions
-docker compose exec app python manage.py generate_question \
-  --topic "binary search" \
-  --difficulty hard \
-  --prompt "Focus on search on answer space problems" \
-  --module "Binary Search"
-
-# Preview only (dry run — does not save to database)
-docker compose exec app python manage.py generate_question \
-  --topic "graph traversal" \
-  --difficulty easy \
-  --dry-run
-
-# Save output to file
-docker compose exec app python manage.py generate_question \
-  --topic "two pointers" \
-  --difficulty easy \
-  --output generated_question.json
-
-# Save to specific module by ID
-docker compose exec app python manage.py generate_question \
-  --topic "hash maps" \
-  --difficulty medium \
-  --module-id 15
-```
-
-### Bulk Generate Questions
-```bash
-# From comma-separated topics
-docker compose exec app python manage.py bulk_generate_questions \
-  --topics "sorting,linked lists,trees" --difficulty easy --module-id 1
-
-# From file (one topic per line)
-docker compose exec app python manage.py bulk_generate_questions \
-  --file /tmp/topics.txt --difficulty hard --module-id 1 --output /tmp/questions.json
-```
-
-### Available Topics
-The RAG system covers 20 DSA topics with 15 problems each (300+ total):
-- Array, String, Linked List, Stack, Queue
-- Binary Trees, Binary Search, Heap/Priority Queue
-- HashMap/Hashing, Graph (BFS/DFS)
-- Dynamic Programming, Backtracking, Greedy
-- Two Pointers/Sliding Window, Bit Manipulation
-- Sorting Algorithms, Matrix, Trie, Recursion
-- Math/Number Theory
-
-### How It Works (Completely Offline)
-
-1. **RAG Retrieval**: Your topic is embedded using a local Sentence Transformer model (`all-MiniLM-L6-v2`) and similar questions are retrieved from ChromaDB (300+ curated DSA problems from `data/DSA_Topics/`)
-
-2. **Problem Adaptation**: Instead of an LLM, the system **adapts existing curated problems** to create new variants:
-   - Selects the most relevant reference problems from the DSA database
-   - Adjusts difficulty level (Easy/Medium/Hard) by modifying constraints and complexity
-   - Generates appropriate starter code with function signatures
-   - Creates 5-8 test cases including edge cases for harder difficulties
-   - References the original problem in the description for transparency
-
-3. **Validation & Save**: The adapted question (matching PRAXIS's JSON schema) is validated and saved directly to the specified module with all test cases
-
-**Performance**: ~1-2 seconds per question (no LLM, no GPU, no internet required)
+Results of the evaluation are in `core/evals/README.md`.
 
 ---
 
-## 💡 Question-Grounded Progressive AI Tutor Hints (Max 3 Hints)
+## 💡 AI Tutor Hints (3 progressive hints, no answers)
 
-Students can unlock progressive pedagogical hints on demand with a simple click in the AI Tutor panel directly above the code editor. Hints are unlocked with intentional clicks rather than automatically consumed by submits, ensuring students retain full ownership of their problem-solving journey while submissions execute instantly in the sandbox without race conditions or throttling conflicts.
+- **One local LLM call per (question, language)** returns exactly three hints as JSON: level 1 helps the student
+  understand the problem, level 2 asks a question pointing at the key property, level 3 names the most common
+  pitfall *in the student's language* (e.g. `int` overflow in Java, `input()` returning a string in Python).
+- **Leak guard**: hints with code, backticks, function signatures, assignments, step lists, “the answer is”,
+  a hidden test's expected output, a named technique (stack, hash map, DP, DFS, sliding window, …) or a construct
+  from another language are rejected; the model gets one retry, then a deterministic language-aware fallback is used.
+  Describing the method in plain words can't be caught by rules — see `core/evals/README.md` for measured results.
+- **Cached** per (question, language, difficulty, code-hash) in Redis and the `GeneratedHintSet` table (editable in
+  Django admin so faculty can review). The web request never waits for the model: on a cache miss the student gets
+  the fallback immediately and the hint upgrades when the LLM set is ready (the UI announces it).
+- **Limits**: 3 hints per question; 10 unlocks per student per minute; 90 s model timeout; 5-minute back-off after a
+  failure. Prompts and responses are logged to the `core.hints.llm` logger without student code.
+- **Hints never reduce points.**
 
-### 🧠 Question-Grounded Theory (Zero Code Policy)
-Hints are **grounded strictly in the theoretical principles of the question** and adhere to a **strict zero-code policy**. The AI tutor inspects the specific question title, domain theory, mathematical definitions, and boundary constraints to generate academic conceptual guidance without providing syntax, code blocks, or solution snippets:
-1. **🧠 Theoretical Foundations & Principles**: Core mathematical or computer science theory governing the problem (e.g., modular congruence, reflectional symmetry across a central axis, matrix Cartesian coordinates and row-major mapping, mathematical induction, Bellman's principle of optimality).
-2. **⚙️ Algorithmic Paradigm & Complexity Theory**: Theoretical paradigms and structural models best suited for the problem (e.g., Divide and Conquer, Dynamic Programming optimal substructure, two-way boundary convergence, monotonicity) along with theoretical $O(...)$ asymptotic complexity bounds.
-3. **🔍 Invariant Analysis & Conceptual Verification**: Theoretical invariant assertions and correctness conditions required throughout problem execution, identifying logical edge conditions and domain limits without code spoilers.
-
-### 🎯 Progressive 3-Tier Hint Strategy
-
-Hints are progressive and strictly capped at a **maximum of 3 unique hints per question**:
-
-| Hint Level | Focus Area | Pedagogical Purpose |
-|:---|:---|:---|
-| **Tier 1** | **Theoretical Foundations & Problem Principles** | Explains the underlying domain theory, mathematical definitions, and boundary conditions in plain conceptual English without code. |
-| **Tier 2** | **Algorithmic Paradigm & Complexity Theory** | Explains the theoretical algorithmic paradigm, state transitions, and asymptotic complexity lower bounds without code. |
-| **Tier 3** | **Invariant Analysis & Conceptual Verification** | Analyzes the theoretical invariants, correctness proofs, and edge-case boundary traps without code. |
-| **Hints 4+** | **Capped at 3** | No further hints can be unlocked. All 3 previously unlocked hints remain accessible in the code editor and submission view. |
-
-### 💡 On-Demand Click-to-Unlock & Cyber Violet Theme
-- **Unlock With Clicks (Not Submits)**: The AI Tutor panel displays each locked hint with an interactive Cyber Violet action button (`[💡 Unlock Hint #N]`). Clicking the button triggers an immediate on-demand generation and reveals the hint with a smooth entrance animation (`hintRevealEntrance`), animated toast notifications (`💡 AI Tutor Hint #N Unlocked!`), and automatic badge updates (`1 of 3 Unlocked`).
-- **Cyber Violet & Cyan Aesthetic**: Hints are styled with a sleek Cyber Violet (`#8b5cf6`), Indigo (`#6366f1`), and Cyan (`#06b6d4`) palette, featuring dedicated badge indicators, subtle glassmorphism borders, and clear typographic hierarchy.
-- **Submissions Free of Side-Effects**: Submitting code runs sample and hidden tests in the sandbox independently without forcing hints or consuming the student's hint quota. Unsuccessful submissions simply display a polite note reminding students that hints can be unlocked above if needed.
-
-### 🔒 Privacy & Pedagogical Safeguards
-- **Zero External API Keys**: 100% offline and self-hosted. Student code never leaves the local campus network or server.
-- **Strict Anti-Code Sanitization**: Comprehensive multi-stage sanitizers scrub raw code fences, code syntax, variable declarations, and programming keywords from LLM output, enforcing pure theoretical text.
-- **Deterministic 11-Domain Theory Engine**: Powered by a local Ollama container running `qwen2.5-coder:1.5b`. If the model is offline or during high lab concurrency (up to 400 students), the built-in deterministic theory engine instantly produces structured theory hints covering Matrix, String, Recursion, Dynamic Programming, Two Pointers/Sliding Window, Sorting/Searching, Number Theory, Linked Lists, Pointers, Structs, and Arrays with zero delay.
-- **Instant Response & Zero Throttling**: Because hints are unlocked on-demand via clicks rather than bundled into submission background tasks, both submissions and hint generation remain responsive and completely immune to submit-spamming issues.
+| Setting | Default | Meaning |
+|---|---|---|
+| `HINT_MODEL` | `qwen3.5:4b` | Ollama model for hints |
+| `OLLAMA_THINK` | `false` | Disable hidden reasoning tokens (much faster on CPU) |
+| `OLLAMA_NUM_THREAD` | `6` (`.env.example`) | Threads per generation |
+| `HINT_LLM_TIMEOUT` | `90` | Seconds before falling back |
+| `HINTS_USE_STUDENT_CODE` | `false` | Send the student's own code (more specific, much less cacheable) |
+| `QUESTION_GEN_MODEL` | `HINT_MODEL` | Model for question generation |
+| `EMBED_MODEL` | `nomic-embed-text` | Embedding model for retrieval and de-duplication |
 
 ---
 
-## 🛡️ User-Friendly Proctoring System
+## 🏆 Points & Ranking
 
-PRAXIS provides a smart, non-punitive proctoring system engineered specifically for computer science lab sessions and placement assessments:
+- **Easy 10 · Medium 25 · Hard 50** points on the *first* accepted solution of a question.
+- Each failed submission before that (wrong answer, TLE, runtime or compile error) removes 10%, down to 50% of base.
+  Infrastructure errors don't count. Re-solving earns nothing. **Hints never reduce points.**
+- Points are computed server-side when a submission is judged (or manually accepted) and stored in a per-question
+  ledger (`PointsLedger`), so every award is auditable. `python manage.py recalculate_points` rebuilds it from history.
+- **Ranking**: total points, ties broken by hard problems solved, then medium, then who reached the score first.
+  Tiers: Bronze (0), Silver (100), Gold (300), Platinum (700). Students see a per-problem breakdown on the
+  leaderboard and on each accepted submission.
 
-- **In-Editor Clipboard Enabled**: Students are completely free to `copy`, `cut`, `paste`, and right-click within the Monaco code editor (`#editor`). Copying from external websites or outside the editor is restricted.
-- **Graduated 3-Warning Notice System**: Instead of immediately locking the screen or showing jarring modal interruptions upon a brief window blur, the platform implements a polite 3-tier warning threshold:
-  - **Warnings 1 & 2**: Non-blocking animated toast notifications (`🛡️ Proctoring Notice (1/3): Focus lost`) appear in the upper-right corner, and the proctoring badge updates dynamically (`Proctoring: 1/3 warnings`).
-  - **Warning 3**: A polite proctoring modal appears prompting the student to return focus and resume coding.
-- **Debounced Window & Tab Transitions**: Focus and blur events are debounced with a 400ms buffer, preventing false violation triggers caused by rapid tab switches, clicking browser menus, or clicking the run/submit buttons.
-- **Non-Intrusive & Tab-Safe**: Intrusive infinite `debugger;` loops are eliminated, ensuring student browser tabs never lock up or freeze.
-- **Polite Fullscreen Reminders**: Exiting fullscreen displays a friendly reminder toast rather than terminating the session.
+---
+
+## 🛡️ Proctoring & Focus Mode
+
+- **What counts as a violation**: the tab becoming hidden (`visibilitychange`, plus a debounced `blur` check),
+  leaving browser fullscreen, and DevTools shortcuts (F12, Ctrl+Shift+I/J/C, Ctrl+U). Copy/cut/drag and right-click
+  outside the editor are blocked with a notice but not counted.
+- **Focus mode** (click the editor or *Focus mode*): a pure CSS layout state — it never calls the browser
+  Fullscreen API, so entering/leaving it or toggling **Read Problem** (`Ctrl+\`) can't trigger a violation.
+  *Exit focus mode* or `Esc` returns to the page; focus is kept inside the overlay and returned to the editor.
+  On narrow screens the problem, hints and editor stack vertically.
+- **Browser fullscreen belongs to proctoring**: it is requested when the assessment starts (and re-requested on the
+  next click if lost); leaving it is always a violation. In Chromium, Keyboard Lock means a short `Esc` press closes
+  focus mode and a long press is needed to leave fullscreen; in other browsers `Esc` leaves fullscreen (logged).
+- **Server-side record**: violations and focus-mode/read-problem transitions are stored in `ProctoringEvent`
+  (not the session), attached to the next submission, rate-limited, and shown to faculty as a timeline on the
+  submission page (UI transitions are marked “not a violation”).
+- Graduated notices: three toasts, then a modal.
 
 ---
 
@@ -436,12 +414,14 @@ The custom Docker sandbox executes code submissions in fully isolated containers
 | **Python** | 71 | CPython 3 (`python3`) | Direct execution, syntax-checked |
 
 ### Sandbox Security Flags
-- **No Network:** `--network none` — submissions cannot access external resources
-- **Dropped Capabilities:** `--cap-drop ALL` — no special Linux capabilities
-- **Resource Limits:** Memory (128MB), CPU (0.5 cores), PID (64 processes)
-- **Ephemeral:** Fresh container per submission, cleaned up automatically
-- **Base64 Encoding:** Source code and stdin are base64-encoded to prevent injection
-- **tmpfs:** `/tmp` is an in-memory filesystem (50MB) for temporary files
+- **No network** (`--network none`), **all capabilities dropped**, `no-new-privileges`, **runs as `nobody`**
+- **Read-only root filesystem**; the per-run host directory is mounted **read-only**; `/tmp` is a 50 MB tmpfs
+- **Limits**: CPU 0.5, 64 PIDs, 256 open files, 16 MB per file, stdout capped at 1 MB and stderr at 64 KB
+  (a flood ends the run as a runtime error instead of exhausting worker memory)
+- **Memory**: the question's limit (default 125 MB); for C/C++ the container gets 384 MB so the compiler fits
+  (`<bits/stdc++.h>` needs ~250 MB) and the question's limit is applied to the program with `ulimit -v`
+- Code runs on the Celery workers; **the web container has no Docker socket** (`SANDBOX_VIA_WORKER=true`)
+- Source and stdin are base64-encoded into the run script; fresh container per run
 
 ---
 
@@ -486,22 +466,21 @@ docker compose exec elab-redis redis-cli
 
 ---
 
-## 📊 Production Tuning for 400 Concurrent Users
+## 📊 Capacity on the 16 GB, CPU-only server
 
-The following settings are configured for high concurrency:
+| Service | Memory limit | Notes |
+|---|---|---|
+| `app` (gunicorn 16×4 gthread) | 2.5 GB | no Docker socket |
+| `worker` (judge/run, concurrency 12) | 2 GB | each sandbox container: 125 MB (384 MB for C/C++), 0.5 CPU |
+| `worker-llm` (concurrency 1) | 1 GB | hints, question generation, embeddings |
+| `ollama` (1 request at a time) | 5 GB | qwen3.5:4b (~3.5 GB) + nomic-embed-text |
+| `elab-db` | 2 GB | `max_connections=500`, `shared_buffers=256MB` |
+| `elab-redis` | 768 MB | `maxmemory 512mb` |
+| `nginx` | 256 MB | |
 
-| Component | Setting | Value |
-|-----------|---------|-------|
-| Gunicorn | Workers | 16 (gthread) |
-| Gunicorn | Threads | 4 per worker |
-| Gunicorn | Timeout | 120s |
-| Celery Worker | Concurrency | 16 (prefork) |
-| Celery Worker | Max tasks per child | 200 |
-| PostgreSQL | Max Connections | 500 |
-| PostgreSQL | Shared Buffers | 256MB |
-| Redis | Max Memory | 512MB |
-| Nginx | Proxy Read Timeout | 120s |
-| Nginx | Buffer Size | 256k |
+Sandbox containers run outside these limits: typical runs use a few MB, but 12 simultaneous large C++ compiles could
+use ~3 GB, which is why worker concurrency is 12 rather than 32. Measured on an i7‑11800H with 6 threads:
+hint sets ~23 s, embeddings for the whole corpus ~100 s, question generation several minutes per question.
 
 ---
 
@@ -528,7 +507,7 @@ The following settings are configured for high concurrency:
   ```bash
   docker build -t elab-sandbox -f sandbox/Dockerfile sandbox/
   ```
-- Verify Docker socket is accessible: `ls -la /var/run/docker.sock`
+- Code runs on the `worker` container (the web container has no Docker socket); check `docker compose logs worker`
 - Check sandbox directory permissions: `chmod 777 sandbox_data`
 
 ### 5. Celery Worker Not Processing Tasks
@@ -537,8 +516,9 @@ The following settings are configured for high concurrency:
 - Restart worker: `docker compose restart worker`
 
 ### 6. Question Generator Issues
-- Ensure RAG is ingested: `docker compose exec app python manage.py rag_ingest`
-- Check RAG agent logs: `docker compose logs app`
+- "index is empty or was built with a different embedding model": run `docker compose exec worker python manage.py rag_index`
+- Jobs stuck in "queued": check the LLM worker — `docker compose logs -f worker-llm`
+- Every candidate rejected: the drawer lists the stage (schema, citation, grounding, language, execution, duplicate)
 
 ### 7. Certificate PDF Generation Fails
 - Ensure `weasyprint` dependencies are installed (included in Dockerfile)
@@ -546,7 +526,7 @@ The following settings are configured for high concurrency:
 
 ### 8. Local AI / Tutor Hints Troubleshooting
 - **Ollama container status**: Verify Ollama is running: `docker compose ps ollama`.
-- **Model verification**: Ensure `qwen2.5-coder:1.5b` is downloaded:
+- **Model verification**: Ensure `qwen3.5:4b` and `nomic-embed-text` are downloaded:
   ```bash
   docker compose exec ollama ollama list
   ```
