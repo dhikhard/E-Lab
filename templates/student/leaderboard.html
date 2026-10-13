@@ -3,37 +3,109 @@
 <section class="toolbar">
   <div>
     <h1>Leaderboard</h1>
-    <p class="muted">Top 50 students by score and solved problems</p>
+    <p class="muted">Top 50 students by points. Ties are broken by hard problems solved, then medium, then who reached the score first.</p>
   </div>
   <a class="secondary as-link" href="{% url 'dashboard' %}">Dashboard</a>
 </section>
 
-<section class="panel">
+{% if me %}
+<section class="panel points-summary" aria-labelledby="my-points-heading">
+  <h2 class="panel-title" id="my-points-heading">Your points</h2>
+  <dl class="stats">
+    <dt>Rank</dt><dd>#{{ me.rank }}</dd>
+    <dt>Points</dt><dd>{{ me.points }}</dd>
+    <dt>Tier</dt><dd>{{ me.tier.name }}</dd>
+    <dt>Solved</dt><dd>{{ me.solved }}</dd>
+  </dl>
+  {% if me.tier.next_name %}
+    <p class="muted">{{ me.tier.points_to_next }} more point{{ me.tier.points_to_next|pluralize }} to reach {{ me.tier.next_name }}.</p>
+  {% endif %}
+
+  <details class="points-rules">
+    <summary>How points are calculated</summary>
+    <ul class="muted">
+      <li>First accepted solution: Easy {{ base_points.easy }} · Medium {{ base_points.medium }} · Hard {{ base_points.hard }} points.</li>
+      <li>Each failed submission before your first accept removes 10%, down to a minimum of 50%.</li>
+      <li>Solving the same problem again earns no extra points.</li>
+      <li>Using hints never reduces your points.</li>
+    </ul>
+  </details>
+
+  {% if my_ledger %}
   <div class="table-wrap">
     <table>
+      <caption class="muted">Your recent awards</caption>
       <thead>
         <tr>
-          <th>Rank</th>
-          <th>Student</th>
-          <th>USN</th>
-          <th>Problems Solved</th>
-          <th>Total Score</th>
+          <th scope="col">Problem</th>
+          <th scope="col">Difficulty</th>
+          <th scope="col" class="num">Base</th>
+          <th scope="col" class="num">Failed attempts</th>
+          <th scope="col" class="num">Reduction</th>
+          <th scope="col" class="num">Awarded</th>
         </tr>
       </thead>
       <tbody>
-        {% for student in students %}
+        {% for row in my_ledger %}
           <tr>
-            <td>{{ forloop.counter }}</td>
-            <td>{{ student.display_name }}</td>
-            <td>{{ student.usn|default:"-" }}</td>
-            <td>{{ student.problems_solved|default:0 }}</td>
-            <td>{{ student.total_score|default:0 }}</td>
+            <td><a href="{% url 'submission_detail' row.submission_id %}">{{ row.question.title }}{% if row.subquestion %} ({{ row.subquestion.get_type_display }}){% endif %}</a></td>
+            <td><span class="badge badge-{{ row.difficulty }}">{{ row.get_difficulty_display }}</span></td>
+            <td class="num">{{ row.base_points }}</td>
+            <td class="num">{{ row.wrong_attempts }}</td>
+            <td class="num">{% if row.decay_percent %}−{{ row.decay_percent }}%{% else %}—{% endif %}</td>
+            <td class="num"><strong>{{ row.points }}</strong></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted empty-state">No points yet — solve your first problem to get on the board.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="table-wrap">
+    <table class="leaderboard-table">
+      <thead>
+        <tr>
+          <th scope="col" class="num">Rank</th>
+          <th scope="col">Student</th>
+          <th scope="col">USN</th>
+          <th scope="col">Tier</th>
+          <th scope="col" class="num">Solved</th>
+          <th scope="col" class="num">Hard</th>
+          <th scope="col" class="num">Points</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr{% if row.student.pk == user.pk %} class="is-current-user" aria-current="true"{% endif %}>
+            <td class="num">{{ row.rank }}</td>
+            <td>{{ row.student.display_name }}</td>
+            <td>{{ row.student.usn|default:"-" }}</td>
+            <td>{{ row.tier.name }}</td>
+            <td class="num">{{ row.solved }}</td>
+            <td class="num">{{ row.hard_solved }}</td>
+            <td class="num"><strong>{{ row.points }}</strong></td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="5">No students yet.</td>
+            <td colspan="7" class="muted empty-state">No students yet.</td>
           </tr>
         {% endfor %}
+        {% if me and not me_in_top %}
+          <tr class="is-current-user" aria-current="true">
+            <td class="num">{{ me.rank }}</td>
+            <td>{{ me.student.display_name }} (you)</td>
+            <td>{{ me.student.usn|default:"-" }}</td>
+            <td>{{ me.tier.name }}</td>
+            <td class="num">{{ me.solved }}</td>
+            <td class="num">{{ me.hard_solved }}</td>
+            <td class="num"><strong>{{ me.points }}</strong></td>
+          </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>

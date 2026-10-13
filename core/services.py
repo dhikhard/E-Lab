@@ -345,6 +345,11 @@ def evaluate_submission(submission_id):
         submission.judged_at = timezone.now()
         submission.save()
         try:
+            from .points import award_points
+            award_points(submission)
+        except Exception as e:
+            logger.error(f"Points award error for submission {submission_id}: {e}", exc_info=True)
+        try:
             for assignment in ModuleQuestionAssignment.objects.filter(student=submission.student, module=submission.question.module):
                 sync_assignment_completion(assignment)
             update_progress(submission.student, submission.question.module)

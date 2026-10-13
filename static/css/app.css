@@ -6267,3 +6267,14 @@ input[type="radio"] {
   accent-color: var(--accent-primary, #6366f1);
   margin: 0;
 }
+
+/* ── Points & leaderboard (T5) — layout only, existing colour tokens ── */
+.points-summary { display: grid; gap: 12px; margin-bottom: 20px; }
+.points-summary .stats { margin: 0; }
+.points-rules summary { cursor: pointer; font-weight: 600; }
+.points-rules ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.6; }
+.table-wrap caption { text-align: left; padding: 0 0 8px; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.is-current-user td { background: var(--surface-soft); }
+.empty-state { text-align: center; padding: 20px 12px; }
+.points-breakdown { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }

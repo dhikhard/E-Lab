@@ -15,8 +15,7 @@ from django.contrib.auth.views import LoginView, LogoutView
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection
-from django.db.models import Count, Q, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -42,7 +41,7 @@ from .forms import (
     TestCaseForm,
 )
 from .models import SubQuestion
-from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
+from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, PointsLedger, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
 from .sandbox import run_code as sandbox_run_code, language_for_id, inject_headers
 from .serializers import ProgressSerializer, QuestionSerializer, SubmissionSerializer
 from .services import (
@@ -61,6 +60,7 @@ from .services import (
     update_progress,
 )
 from .tasks import evaluate_submission_task, generate_llm_hint_task
+from .points import BASE_POINTS, award_points, leaderboard_rows, student_rank
 from .hint_service import get_student_hints_for_question, generate_hint_for_submission, unlock_hint_for_question
 
 logger = logging.getLogger(__name__)
@@ -541,24 +541,7 @@ def dashboard(request):
     eligible, _ = certificate_eligible(request.user)
     certificates = request.user.certificates.all()
 
-    # Enhanced data for Ecosystem UI
-    leaderboard_qs = (
-        User.objects.filter(role=User.Role.STUDENT)
-        .annotate(
-            total_score=Coalesce(Sum("submissions__score"), Value(0)),
-            problems_solved=Count("submissions__question", filter=Q(submissions__status=Submission.Status.ACCEPTED), distinct=True),
-        )
-    )
-
-    # Efficient rank calculation
-    current_user_stats = leaderboard_qs.get(id=request.user.id)
-    user_rank = leaderboard_qs.filter(
-        Q(total_score__gt=current_user_stats.total_score) |
-        Q(total_score=current_user_stats.total_score, problems_solved__gt=current_user_stats.problems_solved) |
-        Q(total_score=current_user_stats.total_score, problems_solved=current_user_stats.problems_solved, username__lt=current_user_stats.username)
-    ).count() + 1
-
-    global_leaderboard = leaderboard_qs.order_by("-total_score", "-problems_solved", "username")[:20]
+    user_rank = student_rank(request.user)
     recent_activity = Submission.objects.filter(student=request.user).select_related("question")[:10]
 
     return render(
@@ -578,7 +561,6 @@ def dashboard(request):
             "certificate_eligible": eligible,
             "certificates": certificates,
             "user_rank": user_rank,
-            "global_leaderboard": global_leaderboard,
             "recent_activity": recent_activity,
         },
     )
@@ -1018,6 +1000,7 @@ def manual_accept_submission(request, submission_id):
     submission.graded_by = request.user
     submission.judged_at = timezone.now()
     submission.save(update_fields=["status", "score", "manually_graded", "graded_by", "judged_at"])
+    award_points(submission)
     for assignment in submission.student.module_assignments.filter(module=submission.question.module):
         sync_assignment_completion(assignment)
     update_progress(submission.student, submission.question.module)
@@ -1101,15 +1084,26 @@ def certificate_verify(request, verification_hash):
 
 @login_required
 def leaderboard(request):
-    students = (
-        User.objects.filter(role=User.Role.STUDENT)
-        .annotate(
-            total_score=Coalesce(Sum("submissions__score"), Value(0)),
-            problems_solved=Count("submissions__question", filter=Q(submissions__status=Submission.Status.ACCEPTED), distinct=True),
+    rows = leaderboard_rows(User.objects.filter(role=User.Role.STUDENT))
+    me = next((row for row in rows if row["student"].pk == request.user.pk), None)
+    my_ledger = []
+    if me:
+        my_ledger = list(
+            PointsLedger.objects.filter(student=request.user)
+            .select_related("question", "subquestion")
+            .order_by("-awarded_at")[:20]
         )
-        .order_by("-total_score", "-problems_solved", "username")[:50]
+    return render(
+        request,
+        "student/leaderboard.html",
+        {
+            "rows": rows[:50],
+            "me": me,
+            "me_in_top": bool(me and me["rank"] <= 50),
+            "my_ledger": my_ledger,
+            "base_points": BASE_POINTS,
+        },
     )
-    return render(request, "student/leaderboard.html", {"students": students})
 
 
 @login_required
@@ -2169,23 +2163,7 @@ def faculty_student_detail(request, student_id):
     eligible, _ = certificate_eligible(student)
     certificates = student.certificates.all()
 
-    # Rank
-    leaderboard_qs = (
-        User.objects.filter(role=User.Role.STUDENT)
-        .annotate(
-            total_score=Coalesce(Sum("submissions__score"), Value(0)),
-            problems_solved=Count("submissions__question", filter=Q(submissions__status=Submission.Status.ACCEPTED), distinct=True),
-        )
-    )
-    try:
-        current_user_stats = leaderboard_qs.get(id=student.id)
-        user_rank = leaderboard_qs.filter(
-            Q(total_score__gt=current_user_stats.total_score) |
-            Q(total_score=current_user_stats.total_score, problems_solved__gt=current_user_stats.problems_solved) |
-            Q(total_score=current_user_stats.total_score, problems_solved=current_user_stats.problems_solved, username__lt=current_user_stats.username)
-        ).count() + 1
-    except User.DoesNotExist:
-        user_rank = None
+    user_rank = student_rank(student)
 
     recent_activity = Submission.objects.filter(student=student).select_related("question", "question__module")[:10]
     return render(

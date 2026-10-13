@@ -21,6 +21,22 @@
   </div>
 </section>
 
+{% if submission.status == "accepted" %}
+<section class="panel points-breakdown" aria-label="Points for this submission">
+  {% with award=submission.points_award %}
+  {% if award %}
+    <strong>+{{ award.points }} points</strong>
+    <span class="muted">{{ award.get_difficulty_display }} base {{ award.base_points }}</span>
+    <span class="muted">{{ award.wrong_attempts }} failed attempt{{ award.wrong_attempts|pluralize }} before this{% if award.decay_percent %} (−{{ award.decay_percent }}%){% endif %}</span>
+    <span class="muted">Hints never reduce points.</span>
+  {% else %}
+    <span class="muted">Already solved earlier — no additional points for this submission.</span>
+  {% endif %}
+  {% endwith %}
+  <a class="as-link" href="{% url 'leaderboard' %}">Leaderboard</a>
+</section>
+{% endif %}
+
 {% if submission.status == "pending" or submission.status == "running" %}
   <section class="panel judging-panel">
     <div>

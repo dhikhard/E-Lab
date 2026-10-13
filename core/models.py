@@ -716,3 +716,45 @@ class SubQuestionTestCase(models.Model):
         label = "sample" if self.is_sample else "hidden"
         return f"{self.subquestion} ({label} #{self.order})"
 
+
+
+class PointsLedger(models.Model):
+    """
+    One row per (student, question[, sub-question]) first solve. Points are
+    computed server-side from difficulty and prior failed attempts; the stored
+    breakdown lets students see why they got their score and lets the formula
+    be recalculated later (see `manage.py recalculate_points`).
+    """
+
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="points_ledger")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="points_ledger")
+    subquestion = models.ForeignKey(
+        "SubQuestion", on_delete=models.CASCADE, null=True, blank=True, related_name="points_ledger"
+    )
+    submission = models.OneToOneField(Submission, on_delete=models.CASCADE, related_name="points_award")
+    difficulty = models.CharField(max_length=16, choices=Question.Difficulty.choices)
+    base_points = models.PositiveSmallIntegerField()
+    wrong_attempts = models.PositiveIntegerField(default=0)
+    decay_percent = models.PositiveSmallIntegerField(default=0)
+    points = models.PositiveSmallIntegerField()
+    formula_version = models.PositiveSmallIntegerField(default=1)
+    awarded_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-awarded_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "question"],
+                condition=models.Q(subquestion__isnull=True),
+                name="uniq_points_per_question",
+            ),
+            models.UniqueConstraint(
+                fields=["student", "question", "subquestion"],
+                condition=models.Q(subquestion__isnull=False),
+                name="uniq_points_per_subquestion",
+            ),
+        ]
+        indexes = [models.Index(fields=["student", "awarded_at"])]
+
+    def __str__(self):
+        return f"{self.student} +{self.points} for {self.question}"
