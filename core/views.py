@@ -41,7 +41,7 @@ from .forms import (
     TestCaseForm,
 )
 from .models import SubQuestion
-from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, PointsLedger, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
+from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, PointsLedger, ProctoringEvent, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
 from .sandbox import run_code as sandbox_run_code, language_for_id, inject_headers
 from .serializers import ProgressSerializer, QuestionSerializer, SubmissionSerializer
 from .services import (
@@ -791,11 +791,8 @@ def question_detail(request, question_id):
         else:
             submission.language_id = display_question.language_id
         
-        session_key = f"violations_{request.user.id}_{question.id}"
-        submission.proctoring_violations = request.session.get(session_key, 0)
-        request.session[session_key] = 0
-        
         submission.save()
+        claim_proctoring_events(submission)
         evaluate_submission_task.delay(submission.pk)
         messages.success(request, "Submission queued. We'll take you to the results shortly.")
         return redirect("submission_detail", submission.pk)
@@ -829,6 +826,10 @@ def submission_detail(request, submission_id):
     hints_data = get_student_hints_for_question(request.user, submission.question)
     latest_hint = submission.hints.first() or (hints_data["hints"][-1] if hints_data["hints"] else None)
 
+    proctoring_events = []
+    if request.user.is_faculty_like:
+        proctoring_events = list(submission.proctoring_events.all())
+
     return render(
         request,
         "student/submission_detail.html",
@@ -836,6 +837,7 @@ def submission_detail(request, submission_id):
             "submission": submission,
             "hints_data": hints_data,
             "latest_hint": latest_hint,
+            "proctoring_events": proctoring_events,
         },
     )
 
@@ -2483,21 +2485,12 @@ class SubmissionViewSet(
             raise DRFPermissionDenied("This question is not assigned to you.")
         if not can_submit(self.request.user, question):
             raise Throttled(detail="Please wait 10 seconds before submitting again.")
-        session_key = f"violations_{self.request.user.id}_{question.id}"
-        violations = self.request.session.get(session_key, 0)
-        self.request.session[session_key] = 0
-
-        session_key_logs = f"violations_logs_{self.request.user.id}_{question.id}"
-        logs = self.request.session.get(session_key_logs, [])
-        self.request.session[session_key_logs] = []
-
         submission = serializer.save(
             student=self.request.user,
             language_id=serializer.validated_data.get('language_id') or question.language_id,
             status=Submission.Status.PENDING,
-            proctoring_violations=violations,
-            proctoring_logs=logs,
         )
+        claim_proctoring_events(submission)
         evaluate_submission_task.delay(submission.pk)
 
 
@@ -2561,28 +2554,86 @@ class SubmissionLatestViewSet(viewsets.ViewSet):
 @login_required
 @require_POST
 def report_violation(request):
-    import json
-    import datetime
+    data = _json_body(request)
+    question = _question_from_payload(data)
+    if question is None:
+        return JsonResponse({"error": "Unknown question"}, status=400)
+    if not _proctoring_rate_ok(request.user):
+        return JsonResponse({"error": "Too many events"}, status=429)
+    reason = str(data.get("reason") or "Unknown violation")[:200]
+    ProctoringEvent.objects.create(
+        student=request.user, question=question, kind=ProctoringEvent.Kind.VIOLATION, reason=reason
+    )
+    violations = ProctoringEvent.objects.filter(
+        student=request.user, question=question, submission__isnull=True, kind=ProctoringEvent.Kind.VIOLATION
+    ).count()
+    return JsonResponse({"status": "logged", "violations": violations, "reason": reason})
+
+
+AUDIT_ONLY_EVENTS = {
+    ProctoringEvent.Kind.FOCUS_ENTER,
+    ProctoringEvent.Kind.FOCUS_EXIT,
+    ProctoringEvent.Kind.PROBLEM_OPEN,
+    ProctoringEvent.Kind.PROBLEM_CLOSE,
+}
+
+
+@login_required
+@require_POST
+def proctoring_audit(request):
+    """Record in-app UI transitions (focus mode, Read Problem). Never a violation."""
+    data = _json_body(request)
+    question = _question_from_payload(data)
+    event = data.get("event")
+    if question is None or event not in AUDIT_ONLY_EVENTS:
+        return JsonResponse({"error": "Invalid audit event"}, status=400)
+    if not _proctoring_rate_ok(request.user):
+        return JsonResponse({"error": "Too many events"}, status=429)
+    ProctoringEvent.objects.create(student=request.user, question=question, kind=event)
+    return JsonResponse({"status": "logged"})
+
+
+PROCTORING_EVENTS_PER_MINUTE = 30
+
+
+def _proctoring_rate_ok(user):
+    key = f"proctoring-events:{user.id}"
+    cache.add(key, 0, 60)
+    try:
+        return cache.incr(key) <= PROCTORING_EVENTS_PER_MINUTE
+    except ValueError:
+        return True
+
+
+def _json_body(request):
     try:
         data = json.loads(request.body) if request.body else {}
-    except (json.JSONDecodeError, TypeError):
-        data = {}
-    question_id = data.get("question_id", "general")
-    reason = data.get("reason", "Unknown Violation")
-    
-    # Store count
-    session_key_count = f"violations_{request.user.id}_{question_id}"
-    violations = request.session.get(session_key_count, 0) + 1
-    request.session[session_key_count] = violations
-    
-    # Store logs
-    session_key_logs = f"violations_logs_{request.user.id}_{question_id}"
-    logs = request.session.get(session_key_logs, [])
-    timestamp = datetime.datetime.now().strftime("%I:%M:%S %p")
-    logs.append(f"[{timestamp}] {reason}")
-    request.session[session_key_logs] = logs
-        
-    return JsonResponse({"status": "logged", "violations": violations, "reason": reason})
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _question_from_payload(data):
+    try:
+        return Question.objects.filter(pk=int(data.get("question_id"))).first()
+    except (TypeError, ValueError):
+        return None
+
+
+def claim_proctoring_events(submission):
+    """Attach unclaimed proctoring events for this student/question to `submission`."""
+    events = list(
+        ProctoringEvent.objects.filter(
+            student=submission.student, question=submission.question, submission__isnull=True
+        )
+    )
+    violations = [e for e in events if e.kind == ProctoringEvent.Kind.VIOLATION]
+    submission.proctoring_violations = len(violations)
+    submission.proctoring_logs = [
+        f"[{timezone.localtime(e.created_at).strftime('%I:%M:%S %p')}] {e.reason}" for e in violations
+    ]
+    submission.save(update_fields=["proctoring_violations", "proctoring_logs"])
+    ProctoringEvent.objects.filter(pk__in=[e.pk for e in events]).update(submission=submission)
 
 @login_required
 @require_POST

@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
 from .models import (
+    PointsLedger,
+    ProctoringEvent,
     AssignedQuestion,
     Attendance,
     Certificate,
@@ -189,3 +191,19 @@ class SubQuestionTestCaseAdmin(admin.ModelAdmin):
     search_fields = ("subquestion__title",)
 
 
+
+
+@admin.register(ProctoringEvent)
+class ProctoringEventAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "student", "question", "kind", "reason", "submission")
+    list_filter = ("kind",)
+    search_fields = ("student__username", "student__usn", "question__title")
+    raw_id_fields = ("student", "question", "submission")
+
+
+@admin.register(PointsLedger)
+class PointsLedgerAdmin(admin.ModelAdmin):
+    list_display = ("awarded_at", "student", "question", "difficulty", "base_points", "wrong_attempts", "points")
+    list_filter = ("difficulty", "formula_version")
+    search_fields = ("student__username", "student__usn", "question__title")
+    raw_id_fields = ("student", "question", "subquestion", "submission")

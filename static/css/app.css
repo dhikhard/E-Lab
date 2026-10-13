@@ -6278,3 +6278,52 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.is-current-user td { background: var(--surface-soft); }
 .empty-state { text-align: center; padding: 20px 12px; }
 .points-breakdown { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; }
+.proctoring-timeline { margin-top: 12px; }
+.proctoring-timeline summary { cursor: pointer; font-weight: 600; }
+.proctoring-timeline ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; font-size: 13px; }
+.proctoring-timeline time { font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+/* Focus mode (T4). Read Problem view is a two-column grid: problem + hints
+   on the left (each scrolls independently), editor on the right. Grid tracks
+   use minmax(0, …) so the editor's intrinsic width can't push its header
+   (Hide Problem / Exit focus mode) off-screen, which was the original
+   "can't get back" bug. */
+body.is-maximized-split .question-layout-stacked {
+  display: grid !important;
+  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr) !important;
+  grid-template-rows: minmax(0, 1fr) auto !important;
+}
+body.is-maximized-split .question-card-top {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+body.is-maximized-split .hints-panel-card {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  max-height: 38vh;
+  overflow-y: auto;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+body.is-maximized-split .submit-panel-wide {
+  grid-column: 2 !important;
+  grid-row: 1 / span 2 !important;
+  min-width: 0 !important;
+}
+body.is-maximized-page .submit-panel-wide { overflow-y: auto !important; }
+body.is-maximized-page .editor-header-bar { flex-wrap: wrap; row-gap: 8px; }
+
+/* Focus mode on small screens (T4): stack problem, hints, editor and scroll */
+@media (max-width: 768px) {
+  body.is-maximized-split .question-layout-stacked {
+    display: block !important;
+    overflow-y: auto !important;
+  }
+  body.is-maximized-split .question-card-top { height: auto !important; max-height: none !important; }
+  body.is-maximized-split .hints-panel-card { max-height: none; }
+  body.is-maximized-split .submit-panel-wide { height: 85vh !important; }
+  body.is-maximized-page .monaco-editor { min-height: 280px !important; }
+}

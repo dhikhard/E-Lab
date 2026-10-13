@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% block content %}
-<div id="fullscreen-toast" class="fullscreen-toast" aria-hidden="true">
-  <span>⚡ Fullscreen Mode Enabled — Press <strong>ESC</strong> to exit</span>
-</div>
+<div id="fullscreen-toast" class="fullscreen-toast" role="status" aria-live="polite"></div>
 
 <!-- Animated Notification System Container -->
 <div id="toast-container" class="toast-container" aria-live="polite"></div>
@@ -317,10 +315,10 @@
     </div>
     {% endif %}
 
-    <button type="button" class="secondary maximize-page-btn" id="editor-maximize-btn" title="Toggle Full Screen Editor" style="min-height: 42px; height: 42px; padding: 0 20px; font-size: 14px; gap: 8px; border-radius: var(--radius-full);">
+    <button type="button" class="secondary maximize-page-btn" id="editor-maximize-btn" title="Focus mode: editor fills the window" aria-pressed="false" style="min-height: 42px; height: 42px; padding: 0 20px; font-size: 14px; gap: 8px; border-radius: var(--radius-full);">
       <svg class="icon-maximize" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0-2-2h-3"></path></svg>
       <svg class="icon-minimize" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1-2 2v3"></path></svg>
-      <span class="max-text">Maximize</span>
+      <span class="max-text">Focus mode</span>
     </button>
     <a class="back-button as-link" href="{% url 'module_detail' display_question.module.id %}">Back</a>
   </div>
@@ -328,7 +326,7 @@
 
 <section class="question-layout-stacked">
   <!-- TOP: Problem Statement & Examples Card -->
-  <article class="question-card-top">
+  <article class="question-card-top" id="problem-statement">
     <div class="panel-header" style="margin-bottom: 16px;">
       <div class="panel-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -516,12 +514,12 @@
   </span>
 </div>
 {% endif %}
-        <button type="button" class="secondary" id="editor-toggle-desc-btn" title="Toggle Problem Description" style="display: none; height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-sm); margin-right: 8px;">
+        <button type="button" class="secondary" id="editor-toggle-desc-btn" title="Show or hide the problem (Ctrl+\)" aria-keyshortcuts="Control+Backslash" aria-controls="problem-statement" aria-pressed="false" style="display: none; height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-sm); margin-right: 8px;">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
-          Read Problem
+          <span class="desc-label">Read Problem</span>
         </button>
-        <button type="button" class="secondary" id="editor-minimize-btn" title="Exit Full Screen" style="display: none; height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-sm);">
-          Exit Fullscreen
+        <button type="button" class="secondary" id="editor-minimize-btn" title="Return to the normal page (Esc)" aria-keyshortcuts="Escape" style="display: none; height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-sm);">
+          Exit focus mode
         </button>
       </div>
     </div>
@@ -869,21 +867,15 @@ public class Main {
       editor.onDidChangeModelContent(function() {
         textarea.value = editor.getValue();
       });
-      editor.onDidFocusEditorWidget(function() {
-        // Don't force fullscreen when clicking editor during proctoring —
-        // fullscreen was already requested at proctoring start. This prevents
-        // the question content from being hidden and causing violations.
-        if (!window.proctoringMonitoringActive) {
-          if (!document.body.classList.contains("is-maximized-page") && typeof window.toggleMaximize === 'function') {
-            window.toggleMaximize();
-          }
-        }
+      // Clicking the editor opens focus mode (a CSS layout state, so this is
+      // safe during proctoring). Keyboard focus alone doesn't, to avoid an
+      // unexpected context change for keyboard users.
+      editor.onMouseDown(function() {
+        if (typeof window.enterFocusMode === 'function') window.enterFocusMode();
       });
     } else {
-      textarea.addEventListener('focus', function() {
-        if (!document.body.classList.contains("is-maximized-page") && typeof window.toggleMaximize === 'function') {
-          window.toggleMaximize();
-        }
+      textarea.addEventListener('mousedown', function() {
+        if (typeof window.enterFocusMode === 'function') window.enterFocusMode();
       });
     }
   });
@@ -2101,7 +2093,6 @@ public class Main {
     const csrfToken = csrfInput ? csrfInput.value : "";
     let violationReported = false;
     window.proctoringMonitoringActive = false;
-    let _intentionalFullscreenExit = false;
 
     // Show instructions if not already acknowledged for this question session
     if (!sessionStorage.getItem('proctoring_agreed_' + questionId)) {
@@ -2169,6 +2160,7 @@ public class Main {
       ackBtn.addEventListener('click', () => {
         overlay.classList.remove('active');
         violationReported = false; // Reset for next time
+        if (window.proctoringMonitoringActive && !document.fullscreenElement) window.requestFullscreen();
       });
     }
 
@@ -2259,16 +2251,21 @@ public class Main {
         }
       });
 
-      // 5. Fullscreen exit polite notification
+      // 5. Leaving browser fullscreen is a violation. The app itself never
+      //    exits fullscreen (focus mode / Read Problem are CSS-only), so every
+      //    exit seen here was initiated by the student or the browser.
       document.addEventListener('fullscreenchange', () => {
         if (!document.fullscreenElement && window.proctoringMonitoringActive) {
-          showAnimatedNotification({
-            type: "info",
-            title: "Fullscreen Exited",
-            message: "Press F11 or click full screen to maintain optimal test conditions."
-          });
+          window.triggerViolation("Exited fullscreen mode");
         }
       });
+
+      // Re-entering fullscreen needs a user gesture; use the next click.
+      document.addEventListener('pointerdown', () => {
+        if (window.proctoringMonitoringActive && !document.fullscreenElement && document.fullscreenEnabled) {
+          window.requestFullscreen();
+        }
+      }, true);
     }
   })();
 
@@ -2299,139 +2296,235 @@ public class Main {
 </script>
 {% endif %}
 
-<!-- MAXIMIZE / FULLSCREEN (always available, independent of proctoring) -->
+<!-- FOCUS MODE (in-page layout state, always available, independent of proctoring) -->
 <script>
-  // Define fullscreen utility so it's available when needed
+  // Browser fullscreen belongs to proctoring alone. Focus mode and the
+  // "Read Problem" panel are pure CSS layout states: they never call
+  // requestFullscreen()/exitFullscreen(), so toggling them cannot fire
+  // fullscreenchange/visibilitychange/blur and cannot be read as a violation.
   window.requestFullscreen = function() {
     const el = document.documentElement;
+    const lockEscape = function() {
+      // Chromium only: with Keyboard Lock, a short Esc press reaches the page
+      // (so it can close focus mode) and leaving fullscreen needs a long press.
+      if (navigator.keyboard && navigator.keyboard.lock) {
+        navigator.keyboard.lock(["Escape"]).catch(function() {});
+      }
+    };
+    if (document.fullscreenElement) return;
     if (el.requestFullscreen) {
-      el.requestFullscreen().catch(function(e) { console.log('Fullscreen blocked:', e); });
+      el.requestFullscreen().then(lockEscape).catch(function(e) { console.log('Fullscreen blocked:', e); });
     } else if (el.webkitRequestFullscreen) {
       el.webkitRequestFullscreen();
-    } else if (el.msRequestFullscreen) {
-      el.msRequestFullscreen();
     }
   };
 
-  (function initMaximize() {
-    window._intentionalFullscreenExit = false;
-    setTimeout(() => {
-      const editorNode = document.getElementById("editor");
-      const maxBtn = document.getElementById("editor-maximize-btn");
-      const minBtn = document.getElementById("editor-minimize-btn");
-      const descBtn = document.getElementById("editor-toggle-desc-btn");
-      const toast = document.getElementById("fullscreen-toast");
-      const iconMax = maxBtn ? maxBtn.querySelector('.icon-maximize') : null;
-      const iconMin = maxBtn ? maxBtn.querySelector('.icon-minimize') : null;
-      const maxText = maxBtn ? maxBtn.querySelector('.max-text') : null;
+  (function initFocusMode() {
+    const body = document.body;
+    const questionId = {{ question.id }};
+    const PROBLEM_PREF_KEY = "focus_problem_open_" + questionId;
+    const csrfInput = document.querySelector("input[name='csrfmiddlewaretoken']");
+    const csrfToken = csrfInput ? csrfInput.value : "";
+    const hasEscapeLock = !!(navigator.keyboard && navigator.keyboard.lock);
+    let returnFocusTo = null;
 
-      if (descBtn) {
-        descBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          document.body.classList.toggle('is-maximized-split');
-          if (document.body.classList.contains('is-maximized-split')) {
-            descBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Hide Problem';
-          } else {
-            descBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg> Read Problem';
-          }
-          if (typeof editor !== 'undefined' && editor) setTimeout(() => editor.layout(), 50);
-        });
+    const els = {};
+    function q(id) { return document.getElementById(id); }
+
+    function audit(event) {
+      // Recorded for reviewers only; the server never counts these as violations.
+      if (!window.proctoringMonitoringActive) return;
+      fetch("/api/proctoring/audit/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+        body: JSON.stringify({ question_id: questionId, event: event }),
+        keepalive: true
+      }).catch(function() {});
+    }
+
+    function isFocus() { return body.classList.contains("is-maximized-page"); }
+    function isProblemOpen() { return body.classList.contains("is-maximized-split"); }
+    function relayout() {
+      if (typeof editor !== 'undefined' && editor) setTimeout(function() { editor.layout(); }, 50);
+    }
+    function savePref(open) {
+      try { sessionStorage.setItem(PROBLEM_PREF_KEY, open ? "1" : "0"); } catch (e) {}
+    }
+    function loadPref() {
+      try { return sessionStorage.getItem(PROBLEM_PREF_KEY) === "1"; } catch (e) { return false; }
+    }
+
+    function syncButtons() {
+      const focus = isFocus();
+      const open = isProblemOpen();
+      if (els.maxBtn) {
+        els.maxBtn.setAttribute("aria-pressed", focus ? "true" : "false");
+        if (els.iconMax) els.iconMax.style.display = focus ? "none" : "inline";
+        if (els.iconMin) els.iconMin.style.display = focus ? "inline" : "none";
+        if (els.maxText) els.maxText.textContent = focus ? "Exit focus mode" : "Focus mode";
+      }
+      if (els.exitBtn) els.exitBtn.style.display = focus ? "inline-flex" : "none";
+      if (els.descBtn) {
+        els.descBtn.style.display = focus ? "inline-flex" : "none";
+        els.descBtn.setAttribute("aria-pressed", open ? "true" : "false");
+        if (els.descLabel) els.descLabel.textContent = open ? "Hide Problem" : "Read Problem";
+      }
+    }
+
+    function setProblemOpen(open) {
+      if (open === isProblemOpen()) return;
+      body.classList.toggle("is-maximized-split", open);
+      savePref(open);
+      syncButtons();
+      audit(open ? "problem_open" : "problem_close");
+      relayout();
+    }
+
+    function showFocusToast() {
+      const toast = els.toast;
+      if (!toast) return;
+      let msg = "Focus mode — Ctrl+\\ shows the problem, Esc or “Exit focus mode” returns.";
+      if (window.proctoringMonitoringActive && document.fullscreenElement && !hasEscapeLock) {
+        msg = "Focus mode — use “Exit focus mode” to return. Esc would leave fullscreen and is logged.";
+      }
+      toast.textContent = msg;
+      toast.classList.add("show");
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(function() { toast.classList.remove("show"); }, 3500);
+    }
+
+    window.enterFocusMode = function() {
+      if (isFocus()) return;
+      returnFocusTo = document.activeElement;
+      body.classList.add("is-maximized-page");
+      syncButtons();
+      audit("focus_enter");
+      if (loadPref()) setProblemOpen(true);
+      // Entering focus mode is a user gesture, so it's a good moment to restore
+      // proctored fullscreen if the student isn't in it. Entering never counts
+      // as a violation; only leaving fullscreen does.
+      if (window.proctoringMonitoringActive && !document.fullscreenElement) window.requestFullscreen();
+      showFocusToast();
+      relayout();
+    };
+
+    window.exitFocusMode = function() {
+      if (!isFocus()) return;
+      if (isProblemOpen()) {
+        body.classList.remove("is-maximized-split");
+        audit("problem_close");
+      }
+      body.classList.remove("is-maximized-page");
+      syncButtons();
+      audit("focus_exit");
+      relayout();
+      // Return focus to the editor (or whatever opened focus mode).
+      if (typeof editor !== 'undefined' && editor) {
+        editor.focus();
+      } else if (returnFocusTo && document.contains(returnFocusTo)) {
+        returnFocusTo.focus();
+      } else if (els.maxBtn) {
+        els.maxBtn.focus();
+      }
+    };
+
+    window.toggleMaximize = function() {
+      if (isFocus()) window.exitFocusMode(); else window.enterFocusMode();
+    };
+
+    window.toggleReadProblem = function() {
+      if (!isFocus()) window.enterFocusMode();
+      setProblemOpen(!isProblemOpen());
+    };
+
+    function focusTrapContainer() {
+      if (!isFocus()) return null;
+      return isProblemOpen()
+        ? document.querySelector(".question-layout-stacked")
+        : document.querySelector(".submit-panel-wide");
+    }
+
+    function anyBlockingOverlay() {
+      return !!document.querySelector(".proctor-overlay.active, .proctor-instructions-overlay.active");
+    }
+
+    document.addEventListener("keydown", function(e) {
+      // Ctrl/Cmd + \ toggles the Read Problem panel.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "\\" || e.code === "Backslash")) {
+        e.preventDefault();
+        window.toggleReadProblem();
+        return;
+      }
+      if (!isFocus() || anyBlockingOverlay() || e.defaultPrevented) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (isProblemOpen()) setProblemOpen(false); else window.exitFocusMode();
+        return;
       }
 
-      window.toggleMaximize = function() {
-        if (!document.body.classList.contains("is-maximized-page")) {
-          document.body.classList.add("is-maximized-page");
-          window.requestFullscreen();
-          if (iconMax) iconMax.style.display = 'none';
-          if (iconMin) iconMin.style.display = 'inline';
-          if (maxText) maxText.textContent = 'Minimize';
-          if (minBtn) minBtn.style.display = "inline-flex";
-          if (descBtn) descBtn.style.display = "inline-flex";
-          if (toast) {
-            toast.textContent = "Full screen mode activated.";
-            toast.classList.add("show");
-            clearTimeout(window._toastTimer);
-            window._toastTimer = setTimeout(function() {
-              toast.classList.remove("show");
-            }, 3000);
-          }
-          if (typeof editor !== 'undefined' && editor) editor.layout();
-        } else {
-          document.body.classList.remove("is-maximized-page");
-          document.body.classList.remove("is-maximized-split");
-          if (descBtn) {
-            descBtn.style.display = "none";
-            descBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg> Read Problem';
-          }
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(e => console.log(e));
-          }
-          if (iconMax) iconMax.style.display = 'inline';
-          if (iconMin) iconMin.style.display = 'none';
-          if (maxText) maxText.textContent = 'Maximize';
-          if (minBtn) minBtn.style.display = "none";
-          // If proctoring is active, exit fullscreen triggers violation
-          // UNLESS the user intentionally exited via the "Exit Fullscreen" button
-          if (window.proctoringMonitoringActive && document.fullscreenElement && !_intentionalFullscreenExit) {
-            document.exitFullscreen().catch(e => console.log(e));
-            if (typeof window.triggerViolation === 'function') window.triggerViolation("Minimized editor while proctoring active");
-          }
-          if (typeof editor !== 'undefined' && editor) editor.layout();
+      if (e.key === "Tab") {
+        const container = focusTrapContainer();
+        if (!container) return;
+        const focusables = Array.prototype.filter.call(
+          container.querySelectorAll('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+          function(el) { return el.offsetParent !== null || el === document.activeElement; }
+        );
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (!container.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
         }
       }
+    });
 
-      if (maxBtn) {
-        maxBtn.addEventListener("click", function(e) {
+    function wire() {
+      els.maxBtn = q("editor-maximize-btn");
+      els.exitBtn = q("editor-minimize-btn");
+      els.descBtn = q("editor-toggle-desc-btn");
+      els.descLabel = els.descBtn ? els.descBtn.querySelector(".desc-label") : null;
+      els.toast = q("fullscreen-toast");
+      els.iconMax = els.maxBtn ? els.maxBtn.querySelector('.icon-maximize') : null;
+      els.iconMin = els.maxBtn ? els.maxBtn.querySelector('.icon-minimize') : null;
+      els.maxText = els.maxBtn ? els.maxBtn.querySelector('.max-text') : null;
+
+      if (els.maxBtn) {
+        els.maxBtn.addEventListener("click", function(e) {
           e.preventDefault();
           e.stopPropagation();
           window.toggleMaximize();
         });
       }
-      if (minBtn) {
-        minBtn.addEventListener("click", function(e) {
+      if (els.exitBtn) {
+        els.exitBtn.addEventListener("click", function(e) {
           e.preventDefault();
           e.stopPropagation();
-          window._intentionalFullscreenExit = true;
-          window.toggleMaximize();
-          setTimeout(function() { window._intentionalFullscreenExit = false; }, 1000);
+          window.exitFocusMode();
         });
       }
+      if (els.descBtn) {
+        els.descBtn.addEventListener("click", function(e) {
+          e.preventDefault();
+          window.toggleReadProblem();
+        });
+      }
+      syncButtons();
+    }
 
-      document.addEventListener("keydown", function(e) {
-        if (e.key === "Escape" && document.body.classList.contains("is-maximized-split")) {
-          window._escClosedSplit = true;
-          setTimeout(() => window._escClosedSplit = false, 1000);
-        }
-      });
-
-      document.addEventListener("fullscreenchange", function() {
-        if (!document.fullscreenElement) {
-          // If they pressed ESC while in split mode, treat it as a safe intentional exit of fullscreen
-          if (window._escClosedSplit) {
-            window._intentionalFullscreenExit = true;
-          }
-
-          if (document.body.classList.contains("is-maximized-page")) {
-            // This safely removes the is-maximized-page and is-maximized-split classes
-            toggleMaximize();
-          }
-
-          // Only trigger violation if proctoring is active AND the exit was not intentional
-          if (window.proctoringMonitoringActive && !window._intentionalFullscreenExit) {
-            if (typeof triggerViolation === 'function') {
-              triggerViolation("Exited fullscreen mode");
-            }
-            setTimeout(window.requestFullscreen, 500);
-          }
-          
-          // Clean up the flag if it was set via ESC
-          if (window._escClosedSplit) {
-            window._intentionalFullscreenExit = false;
-            window._escClosedSplit = false;
-          }
-        }
-      });
-    }, 500);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", wire);
+    } else {
+      wire();
+    }
   })();
 </script>
 {% endblock %}

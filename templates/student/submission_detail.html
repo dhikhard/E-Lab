@@ -245,6 +245,18 @@
         <dt>Proctoring Violations</dt><dd>{{ submission.proctoring_violations }}</dd>
       {% endif %}
     </dl>
+    {% if user.is_faculty_like and proctoring_events %}
+      <details class="proctoring-timeline">
+        <summary>Proctoring timeline ({{ proctoring_events|length }} event{{ proctoring_events|length|pluralize }})</summary>
+        <ol>
+          {% for ev in proctoring_events %}
+            <li><time datetime="{{ ev.created_at|date:'c' }}">{{ ev.created_at|time:"H:i:s" }}</time>
+              {% if ev.kind == "violation" %}<strong>Violation:</strong> {{ ev.reason }}{% else %}<span class="muted">{{ ev.get_kind_display }} (not a violation)</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      </details>
+    {% endif %}
   </article>
 
   <article class="panel result-card">

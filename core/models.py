@@ -758,3 +758,34 @@ class PointsLedger(models.Model):
 
     def __str__(self):
         return f"{self.student} +{self.points} for {self.question}"
+
+
+class ProctoringEvent(models.Model):
+    """
+    Server-side proctoring log. Violations are attached to the next submission
+    for that question; focus-mode/read-problem events are recorded for audit
+    only so reviewers can tell "opened focus mode" apart from "switched tabs".
+    """
+
+    class Kind(models.TextChoices):
+        VIOLATION = "violation", "Violation"
+        FOCUS_ENTER = "focus_enter", "Entered focus mode"
+        FOCUS_EXIT = "focus_exit", "Exited focus mode"
+        PROBLEM_OPEN = "problem_open", "Opened Read Problem panel"
+        PROBLEM_CLOSE = "problem_close", "Closed Read Problem panel"
+
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="proctoring_events")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="proctoring_events")
+    submission = models.ForeignKey(
+        Submission, on_delete=models.SET_NULL, null=True, blank=True, related_name="proctoring_events"
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    reason = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        indexes = [models.Index(fields=["student", "question", "submission"])]
+
+    def __str__(self):
+        return f"{self.student} {self.kind} on {self.question_id} at {self.created_at:%H:%M:%S}"
