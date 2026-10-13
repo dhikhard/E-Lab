@@ -83,7 +83,7 @@ class AwardPointsTests(TestCase):
                 base_points=25, wrong_attempts=0, decay_percent=0, points=25,
             )
 
-    @patch("core.hint_service._enqueue_llm_generation")
+    @patch("core.hint_service.enqueue_hint_generation")
     def test_hints_do_not_reduce_points(self, _enqueue):
         """Explicit requirement: unlocking hints must never deduct points."""
         from .hint_service import unlock_hint_for_question

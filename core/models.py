@@ -633,6 +633,9 @@ class StudentQuestionHint(models.Model):
         default="local_llm",
         help_text="local_llm or diagnostic",
     )
+    language = models.CharField(
+        max_length=16, blank=True, default="", help_text="Language the hint was written for (c, cpp, python, java)."
+    )
     unlocked_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -789,3 +792,31 @@ class ProctoringEvent(models.Model):
 
     def __str__(self):
         return f"{self.student} {self.kind} on {self.question_id} at {self.created_at:%H:%M:%S}"
+
+
+class GeneratedHintSet(models.Model):
+    """
+    Three validated, leak-checked LLM hints for one (question, language,
+    difficulty, student-code hash). Durable second-level cache behind Redis so
+    pre-generated hints survive cache eviction and restarts.
+    """
+
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="generated_hint_sets")
+    language = models.CharField(max_length=16)
+    difficulty = models.CharField(max_length=16)
+    code_hash = models.CharField(max_length=16, default="-")
+    prompt_version = models.PositiveSmallIntegerField(default=1)
+    model_name = models.CharField(max_length=80)
+    hints = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["question", "language", "difficulty", "code_hash", "prompt_version"],
+                name="uniq_hint_set",
+            )
+        ]
+
+    def __str__(self):
+        return f"Hints for {self.question_id} ({self.language})"

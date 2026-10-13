@@ -54,7 +54,7 @@ class HintSystemTests(TestCase):
             difficulty=Question.Difficulty.EASY,
         )
 
-    @patch("core.hint_service._enqueue_llm_generation")
+    @patch("core.hint_service.enqueue_hint_generation")
     def test_progressive_hints_capped_at_three(self, _mock_enqueue):
         from .hint_service import generate_hint_for_submission, get_student_hints_for_question
         from .models import StudentQuestionHint, Submission
@@ -138,7 +138,7 @@ class HintSystemTests(TestCase):
         self.assertEqual(data["hints"][0]["hint_number"], 1)
         self.assertEqual(data["hints"][0]["hint_text"], "Check boundary constraints.")
 
-    @patch("core.hint_service._enqueue_llm_generation")
+    @patch("core.hint_service.enqueue_hint_generation")
     def test_unlock_question_hint_api(self, _mock_enqueue):
         from django.utils import timezone
         from .models import AssignedQuestion, ModuleQuestionAssignment
@@ -214,28 +214,44 @@ class LlmHintTaskTests(TestCase):
             hint_number=1, hint_text="old diagnostic text", hint_type="diagnostic",
         )
 
+    # Updated for the T3 hint engine: one task now generates all three tiers per
+    # (question, language) instead of one tier per call. Same guarantees asserted:
+    # the LLM result is cached, previously-shown fallback rows are upgraded, and
+    # a model failure doesn't crash or poison the cache.
+    LLM_JSON = (
+        '{"hints": [{"level": 1, "text": "Think about what you need to remember about numbers you have already seen."},'
+        ' {"level": 2, "text": "A structure with fast lookup by value would let you avoid a second scan."},'
+        ' {"level": 3, "text": "Check each number against what is still needed before storing it, so you never pair it with itself."}]}'
+    )
+
     def test_llm_task_caches_llm_text_and_upgrades_rows(self):
-        from .tasks import generate_llm_hint_task
+        from . import llm_hints
+        from .models import GeneratedHintSet, StudentQuestionHint
+        from .tasks import generate_hint_set_task
 
-        with patch("core.hint_service._call_local_llm_for_question", return_value="LLM: use a hash map for O(n) lookup."):
-            result = generate_llm_hint_task.apply(args=[self.question.id, 1])
+        StudentQuestionHint.objects.filter(student=self.student, question=self.question).update(language="c")
+        with patch("core.llm_hints._call_model", return_value=(self.LLM_JSON, {"eval_count": 80})):
+            result = generate_hint_set_task.apply(args=[self.question.id, "c"])
 
-        self.assertEqual(result.result, "LLM: use a hash map for O(n) lookup.")
-        self.assertEqual(cache.get(f"elab_theory_hint_{self.question.id}_1"), "LLM: use a hash map for O(n) lookup.")
-        self.assertEqual(cache.get(f"elab_llm_kind_{self.question.id}_1"), "llm")
-        from .models import StudentQuestionHint
+        self.assertEqual(len(result.result), 3)
+        self.assertEqual(cache.get(llm_hints.cache_key(self.question, "c"))[1], result.result[1])
+        self.assertTrue(GeneratedHintSet.objects.filter(question=self.question, language="c").exists())
         row = StudentQuestionHint.objects.get(student=self.student, question=self.question, hint_number=1)
         self.assertEqual(row.hint_type, "local_llm")
-        self.assertIn("hash map", row.hint_text)
+        self.assertIn("already seen", row.hint_text)
 
     def test_llm_task_falls_back_without_crashing(self):
-        from .tasks import generate_llm_hint_task
+        import requests
+        from . import llm_hints
+        from .hint_service import generation_status
+        from .tasks import generate_hint_set_task
 
-        with patch("core.hint_service._call_local_llm_for_question", return_value=None):
-            result = generate_llm_hint_task.apply(args=[self.question.id, 2])
+        with patch("core.llm_hints._call_model", side_effect=requests.Timeout("slow")):
+            result = generate_hint_set_task.apply(args=[self.question.id, "c"])
 
-        self.assertTrue(result.result)
-        self.assertEqual(cache.get(f"elab_llm_kind_{self.question.id}_2"), "diagnostic")
+        self.assertIsNone(result.result)
+        self.assertIsNone(cache.get(llm_hints.cache_key(self.question, "c")))
+        self.assertEqual(generation_status(self.question, "c"), "unavailable")
 
 
 @override_settings(CACHES=LOCMEM_CACHE)
@@ -248,17 +264,22 @@ class PregenerateCacheTests(TestCase):
         self.question = Question.objects.create(
             title="Reverse", slug="reverse-pregen", module=self.module,
             description="Reverse a string.", difficulty=Question.Difficulty.EASY,
+            allow_multiple_languages=True,
         )
 
     def test_pregenerate_does_not_poison_llm_cache_slot(self):
+        from . import llm_hints
         from .hint_service import pregenerate_hints_for_question
-        with patch("core.hint_service._enqueue_llm_generation") as enqueue:
+        with patch("core.tasks.generate_hint_set_task.apply_async") as apply_async:
             results = pregenerate_hints_for_question(self.question)
+            again = pregenerate_hints_for_question(self.question)
 
-        self.assertEqual(enqueue.call_count, 3)
-        for tier in (1, 2, 3):
-            self.assertIsNone(cache.get(f"elab_theory_hint_{self.question.id}_{tier}"))
-            self.assertTrue(len(results[tier]) > 10)
+        # One job per student language; a second call while in flight queues nothing.
+        self.assertEqual(apply_async.call_count, 4)
+        self.assertEqual(set(results), {"c", "cpp", "python", "java"})
+        self.assertTrue(all(state == "in-progress" for state in again.values()))
+        for language in results:
+            self.assertIsNone(cache.get(llm_hints.cache_key(self.question, language)))
 
 
 class DiagnosticHintGroundingTests(TestCase):

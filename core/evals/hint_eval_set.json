@@ -1,0 +1,251 @@
+[
+ {
+  "id": "0001-two-sum",
+  "title": "Two Sum",
+  "difficulty": "easy",
+  "language": "python",
+  "description": "Given an array of integers nums\u00a0and an integer target, return indices of the two numbers such that they add up to target.\nYou may assume that each input would have exactly one solution, and you may not use the same element twice.\nYou can return the answer in any order.\nConstraints:\n\nConstraints:\n2 <= nums.length <= 104\n-109 <= nums[i] <= 109\n-109 <= target <= 109\nOnly one valid answer exists.",
+  "examples": [
+   "Input: nums = [2,7,11,15], target = 9\nOutput: [0,1]\nExplanation: Because nums[0] + nums[1] == 9, we return [0, 1].",
+   "Input: nums = [3,2,4], target = 6\nOutput: [1,2]"
+  ],
+  "crux_terms": [
+   "Array",
+   "Hash Table"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0020-valid-parentheses",
+  "title": "Valid Parentheses",
+  "difficulty": "easy",
+  "language": "c",
+  "description": "Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.\nAn input string is valid if:\nConstraints:\n\nConstraints:\n1 <= s.length <= 104\ns consists of parentheses only '()[]{}'.",
+  "examples": [
+   "Input: s = \"()\"\nOutput: true",
+   "Input: s = \"()[]{}\"\nOutput: true"
+  ],
+  "crux_terms": [
+   "String",
+   "Stack"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0007-reverse-integer",
+  "title": "Reverse Integer",
+  "difficulty": "medium",
+  "language": "java",
+  "description": "Given a signed 32-bit integer x, return x with its digits reversed. If reversing x causes the value to go outside the signed 32-bit integer range [-231, 231 - 1], then return 0.\nAssume the environment does not allow you to store 64-bit integers (signed or unsigned).\nConstraints:\n\nConstraints:\n-231 <= x <= 231 - 1",
+  "examples": [
+   "Input: x = 123\nOutput: 321",
+   "Input: x = -123\nOutput: -321"
+  ],
+  "crux_terms": [
+   "Math"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0003-longest-substring-without-repeating-characters",
+  "title": "Longest Substring Without Repeating Characters",
+  "difficulty": "medium",
+  "language": "cpp",
+  "description": "Given a string s, find the length of the longest substring without duplicate characters.\nConstraints:\n\nConstraints:\n0 <= s.length <= 5 * 104\ns consists of English letters, digits, symbols and spaces.",
+  "examples": [
+   "Input: s = \"abcabcbb\"\nOutput: 3\nExplanation: The answer is \"abc\", with the length of 3.",
+   "Input: s = \"bbbbb\"\nOutput: 1\nExplanation: The answer is \"b\", with the length of 1."
+  ],
+  "crux_terms": [
+   "Hash Table",
+   "String",
+   "Sliding Window"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0056-merge-intervals",
+  "title": "Merge Intervals",
+  "difficulty": "medium",
+  "language": "python",
+  "description": "Given an array\u00a0of intervals\u00a0where intervals[i] = [starti, endi], merge all overlapping intervals, and return an array of the non-overlapping intervals that cover all the intervals in the input.\nConstraints:\n\nConstraints:\n1 <= intervals.length <= 104\nintervals[i].length == 2\n0 <= starti <= endi <= 104",
+  "examples": [
+   "Input: intervals = [[1,3],[2,6],[8,10],[15,18]]\nOutput: [[1,6],[8,10],[15,18]]\nExplanation: Since intervals [1,3] and [2,6] overlap, merge them into [1,6].",
+   "Input: intervals = [[1,4],[4,5]]\nOutput: [[1,5]]\nExplanation: Intervals [1,4] and [4,5] are considered overlapping."
+  ],
+  "crux_terms": [
+   "Array",
+   "Sorting"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0070-climbing-stairs",
+  "title": "Climbing Stairs",
+  "difficulty": "easy",
+  "language": "java",
+  "description": "You are climbing a staircase. It takes n steps to reach the top.\nEach time you can either climb 1 or 2 steps. In how many distinct ways can you climb to the top?\nConstraints:\n\nConstraints:\n1 <= n <= 45",
+  "examples": [
+   "Input: n = 2\nOutput: 2\nExplanation: There are two ways to climb to the top.\n1. 1 step + 1 step\n2. 2 steps",
+   "Input: n = 3\nOutput: 3\nExplanation: There are three ways to climb to the top.\n1. 1 step + 1 step + 1 step\n2. 1 step + 2 steps\n3. 2 steps + 1 step"
+  ],
+  "crux_terms": [
+   "Math",
+   "Dynamic Programming",
+   "Memoization"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0053-maximum-subarray",
+  "title": "Maximum Subarray",
+  "difficulty": "medium",
+  "language": "c",
+  "description": "Given an integer array nums, find the subarray with the largest sum, and return its sum.\nConstraints:\nFollow up: If you have figured out the O(n) solution, try coding another solution using the divide and conquer approach, which is more subtle.\n\nConstraints:\n1 <= nums.length <= 105\n-104 <= nums[i] <= 104",
+  "examples": [
+   "Input: nums = [-2,1,-3,4,-1,2,1,-5,4]\nOutput: 6\nExplanation: The subarray [4,-1,2,1] has the largest sum 6.",
+   "Input: nums = [1]\nOutput: 1\nExplanation: The subarray [1] has the largest sum 1."
+  ],
+  "crux_terms": [
+   "Array",
+   "Divide and Conquer",
+   "Dynamic Programming"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0200-number-of-islands",
+  "title": "Number of Islands",
+  "difficulty": "medium",
+  "language": "cpp",
+  "description": "Given an m x n 2D binary grid grid which represents a map of '1's (land) and '0's (water), return the number of islands.\nAn island is surrounded by water and is formed by connecting adjacent lands horizontally or vertically. You may assume all four edges of the grid are all surrounded by water.\nConstraints:\n\nConstraints:\nm == grid.length\nn == grid[i].length\n1 <= m, n <= 300\ngrid[i][j] is '0' or '1'.",
+  "examples": [
+   "Input: grid = [\n  [\"1\",\"1\",\"1\",\"1\",\"0\"],\n  [\"1\",\"1\",\"0\",\"1\",\"0\"],\n  [\"1\",\"1\",\"0\",\"0\",\"0\"],\n  [\"0\",\"0\",\"0\",\"0\",\"0\"]\n]\nOutput: 1",
+   "Input: grid = [\n  [\"1\",\"1\",\"0\",\"0\",\"0\"],\n  [\"1\",\"1\",\"0\",\"0\",\"0\"],\n  [\"0\",\"0\",\"1\",\"0\",\"0\"],\n  [\"0\",\"0\",\"0\",\"1\",\"1\"]\n]\nOutput: 3"
+  ],
+  "crux_terms": [
+   "Array",
+   "Depth-First Search",
+   "Breadth-First Search",
+   "Union Find",
+   "Matrix"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0121-best-time-to-buy-and-sell-stock",
+  "title": "Best Time to Buy and Sell Stock",
+  "difficulty": "easy",
+  "language": "python",
+  "description": "You are given an array prices where prices[i] is the price of a given stock on the ith day.\nYou want to maximize your profit by choosing a single day to buy one stock and choosing a different day in the future to sell that stock.\nReturn the maximum profit you can achieve from this transaction. If you cannot achieve any profit, return 0.\nConstraints:\n\nConstraints:\n1 <= prices.length <= 105\n0 <= prices[i] <= 104",
+  "examples": [
+   "Input: prices = [7,1,5,3,6,4]\nOutput: 5\nExplanation: Buy on day 2 (price = 1) and sell on day 5 (price = 6), profit = 6-1 = 5.\nNote that buying on day 2 and selling on day 1 is not allowed because you must buy before you sell.",
+   "Input: prices = [7,6,4,3,1]\nOutput: 0\nExplanation: In this case, no transactions are done and the max profit = 0."
+  ],
+  "crux_terms": [
+   "Array",
+   "Dynamic Programming"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0322-coin-change",
+  "title": "Coin Change",
+  "difficulty": "medium",
+  "language": "java",
+  "description": "You are given an integer array coins representing coins of different denominations and an integer amount representing a total amount of money.\nReturn the fewest number of coins that you need to make up that amount. If that amount of money cannot be made up by any combination of the coins, return -1.\nYou may assume that you have an infinite number of each kind of coin.\nConstraints:\n\nConstraints:\n1 <= coins.length <= 12\n1 <= coins[i] <= 231 - 1\n0 <= amount <= 104",
+  "examples": [
+   "Input: coins = [1,2,5], amount = 11\nOutput: 3\nExplanation: 11 = 5 + 5 + 1",
+   "Input: coins = [2], amount = 3\nOutput: -1"
+  ],
+  "crux_terms": [
+   "Array",
+   "Dynamic Programming",
+   "Breadth-First Search"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0042-trapping-rain-water",
+  "title": "Trapping Rain Water",
+  "difficulty": "hard",
+  "language": "python",
+  "description": "Given n non-negative integers representing an elevation map where the width of each bar is 1, compute how much water it can trap after raining.\nConstraints:\n\nConstraints:\nn == height.length\n1 <= n <= 2 * 104\n0 <= height[i] <= 105",
+  "examples": [
+   "Input: height = [0,1,0,2,1,0,1,3,2,1,2,1]\nOutput: 6\nExplanation: The above elevation map (black section) is represented by array [0,1,0,2,1,0,1,3,2,1,2,1]. In this case, 6 units of rain water (blue section) are being trapped.",
+   "Input: height = [4,2,0,3,2,5]\nOutput: 9"
+  ],
+  "crux_terms": [
+   "Array",
+   "Two Pointers",
+   "Dynamic Programming",
+   "Stack",
+   "Monotonic Stack"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0004-median-of-two-sorted-arrays",
+  "title": "Median of Two Sorted Arrays",
+  "difficulty": "hard",
+  "language": "cpp",
+  "description": "Given two sorted arrays nums1 and nums2 of size m and n respectively, return the median of the two sorted arrays.\nThe overall run time complexity should be O(log (m+n)).\nConstraints:\n\nConstraints:\nnums1.length == m\nnums2.length == n\n0 <= m <= 1000\n0 <= n <= 1000\n1 <= m + n <= 2000\n-106 <= nums1[i], nums2[i] <= 106",
+  "examples": [
+   "Input: nums1 = [1,3], nums2 = [2]\nOutput: 2.00000\nExplanation: merged array = [1,2,3] and median is 2.",
+   "Input: nums1 = [1,2], nums2 = [3,4]\nOutput: 2.50000\nExplanation: merged array = [1,2,3,4] and median is (2 + 3) / 2 = 2.5."
+  ],
+  "crux_terms": [
+   "Array",
+   "Binary Search",
+   "Divide and Conquer"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0009-palindrome-number",
+  "title": "Palindrome Number",
+  "difficulty": "easy",
+  "language": "c",
+  "description": "Given an integer x, return true if x is a palindrome, and false otherwise.\nConstraints:\n\nConstraints:\n-231\u00a0<= x <= 231\u00a0- 1",
+  "examples": [
+   "Input: x = 121\nOutput: true\nExplanation: 121 reads as 121 from left to right and from right to left.",
+   "Input: x = -121\nOutput: false\nExplanation: From left to right, it reads -121. From right to left, it becomes 121-. Therefore it is not a palindrome."
+  ],
+  "crux_terms": [
+   "Math"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "0049-group-anagrams",
+  "title": "Group Anagrams",
+  "difficulty": "medium",
+  "language": "java",
+  "description": "Given an array of strings strs, group the anagrams together. You can return the answer in any order.\nConstraints:\n\nConstraints:\n1 <= strs.length <= 104\n0 <= strs[i].length <= 100\nstrs[i] consists of lowercase English letters.",
+  "examples": [
+   "Input: strs = [\"eat\",\"tea\",\"tan\",\"ate\",\"nat\",\"bat\"]\nOutput: [[\"bat\"],[\"nat\",\"tan\"],[\"ate\",\"eat\",\"tea\"]]\nExplanation:",
+   "Input: strs = [\"\"]\nOutput: [[\"\"]]"
+  ],
+  "crux_terms": [
+   "Array",
+   "Hash Table",
+   "String",
+   "Sorting"
+  ],
+  "hidden_expected_output": null
+ },
+ {
+  "id": "c-lab-array-sum",
+  "title": "Array Sum",
+  "difficulty": "easy",
+  "language": "c",
+  "description": "Read an integer n followed by n integers from standard input and print their sum on one line.\n\nConstraints:\n1 <= n <= 100000\n-10^9 <= a[i] <= 10^9",
+  "examples": [
+   "Input: 3\n4 5 6\nOutput: 15"
+  ],
+  "crux_terms": [
+   "long long overflow"
+  ],
+  "hidden_expected_output": "100000000000000"
+ }
+]

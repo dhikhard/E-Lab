@@ -1,0 +1,425 @@
+{
+ "model": "qwen3.5:4b",
+ "results": [
+  {
+   "id": "0001-two-sum",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Hash Table"
+   ],
+   "hints": [
+    "Notice that for any number you see, its partner is simply what you need to add to it to reach the target.",
+    "Could you store each number you encounter along with its position so you can quickly check if its partner has already been seen?",
+    "Be careful not to use the same element twice; think about how your storage should handle checking for an existing match versus adding a new one."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 30.68,
+     "prompt_tokens": 732,
+     "output_tokens": 114,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 30.7
+  },
+  {
+   "id": "0020-valid-parentheses",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "String",
+    "Stack"
+   ],
+   "hints": [
+    "Notice that every closing bracket must match the most recently seen opening bracket of the same type.",
+    "Can you keep track of these unmatched opening brackets as you scan through the string from start to finish?",
+    "Remember that if you encounter a closing bracket but have no corresponding opening bracket stored, the string is invalid immediately."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.55,
+     "prompt_tokens": 655,
+     "output_tokens": 98,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 22.6
+  },
+  {
+   "id": "0007-reverse-integer",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens to the digits of a number when you repeatedly remove the last one and move it to the front?",
+    "How can you build the reversed value step by step while checking at each stage if the result would exceed the valid range?",
+    "If the current accumulated value is already very large or very small, how does adding just one more digit affect whether it fits in a 32-bit integer?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 25.73,
+     "prompt_tokens": 700,
+     "output_tokens": 116,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 25.7
+  },
+  {
+   "id": "0003-longest-substring-without-repeating-characters",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Hash Table",
+    "String",
+    "Sliding Window"
+   ],
+   "hints": [
+    "Notice that as you move through the string, any character seen before must be remembered to know when a duplicate occurs.",
+    "Consider how you can track both the current position of each character and the length of the valid segment ending at the current index.",
+    "When you encounter a character that has appeared recently, calculate how far back you must move your start point to exclude that duplicate before continuing."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 24.78,
+     "prompt_tokens": 652,
+     "output_tokens": 113,
+     "tokens_per_s": 7.0
+    }
+   ],
+   "total_s": 24.8
+  },
+  {
+   "id": "0056-merge-intervals",
+   "language": "python",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 1: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 1: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.85,
+     "prompt_tokens": 722,
+     "output_tokens": 114,
+     "tokens_per_s": 7.1
+    },
+    {
+     "latency_s": 15.64,
+     "prompt_tokens": 722,
+     "output_tokens": 110,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 38.5
+  },
+  {
+   "id": "0070-climbing-stairs",
+   "language": "java",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math",
+    "Dynamic Programming",
+    "Memoization"
+   ],
+   "hints": [
+    "Notice that reaching step n depends on how you could have reached the previous steps.",
+    "Consider what happens if you only remember the number of ways to reach the two steps immediately before the current one.",
+    "Be careful not to let your stored values become negative or exceed the maximum integer limit when adding them together."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 19.99,
+     "prompt_tokens": 657,
+     "output_tokens": 97,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 20.0
+  },
+  {
+   "id": "0053-maximum-subarray",
+   "language": "c",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Divide and Conquer",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What if you only kept track of the best sum ending at the current position as you moved through the array?",
+    "How could the best sum ending at the current spot depend on either the previous spot or starting fresh from here?",
+    "Remember that a negative running total only hurts your chances of finding a larger sum later, so you might need to reset it when that happens."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.96,
+     "prompt_tokens": 692,
+     "output_tokens": 110,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.0
+  },
+  {
+   "id": "0200-number-of-islands",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Depth-First Search",
+    "Breadth-First Search",
+    "Union Find",
+    "Matrix"
+   ],
+   "hints": [
+    "Notice that once you identify a group of connected '1's, every cell in that group should be marked so it isn't counted again.",
+    "Could you use one traversal to find an unvisited land and then immediately visit all its neighbors to mark them as part of the same island?",
+    "Be careful to update your marking for both the current cell and its adjacent neighbors so that no connected land is visited twice."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 25.4,
+     "prompt_tokens": 790,
+     "output_tokens": 118,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 25.4
+  },
+  {
+   "id": "0121-best-time-to-buy-and-sell-stock",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "Notice that to make a profit, you must always buy on an earlier day than you sell.",
+    "As you move through the days in order, how can you keep track of the best buying price seen so far and calculate the potential profit at each step?",
+    "Remember that if today's price is lower than your current best buy price, you should update it; otherwise, use the best buy price to see if selling today yields more profit."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 24.37,
+     "prompt_tokens": 726,
+     "output_tokens": 124,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 24.4
+  },
+  {
+   "id": "0322-coin-change",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming",
+    "Breadth-First Search"
+   ],
+   "hints": [
+    "Notice that if you can make a certain amount using fewer coins, adding any coin to it will help you reach larger amounts.",
+    "Could you store the minimum number of coins needed for every value from zero up to the target as you build your solution?",
+    "Remember that if you encounter a value you haven't computed yet, its cost is likely higher than one you have already found."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.09,
+     "prompt_tokens": 729,
+     "output_tokens": 112,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.1
+  },
+  {
+   "id": "0042-trapping-rain-water",
+   "language": "python",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Two Pointers",
+    "Dynamic Programming",
+    "Stack",
+    "Monotonic Stack"
+   ],
+   "hints": [
+    "Notice that water can only be trapped above a bar if there are taller bars on both its left and right sides.",
+    "For each position, the amount of water it holds depends on the tallest bar seen so far from the left and the tallest bar seen so far from the right.",
+    "Be careful to update your records for the maximums as you move through the list, ensuring you compare against the correct extremes when calculating the water level."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.92,
+     "prompt_tokens": 700,
+     "output_tokens": 123,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.9
+  },
+  {
+   "id": "0004-median-of-two-sorted-arrays",
+   "language": "cpp",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Binary Search",
+    "Divide and Conquer"
+   ],
+   "hints": [
+    "Notice that you cannot simply merge the two arrays because that would take linear time, which exceeds your limit.",
+    "Consider how you could find the median by comparing elements from both arrays simultaneously without ever storing all numbers together.",
+    "Think about what happens to the indices of the two arrays as you move them forward based on their current values, and ensure your calculations handle cases where one array is empty or has a single element correctly."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.08,
+     "prompt_tokens": 735,
+     "output_tokens": 120,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.1
+  },
+  {
+   "id": "0009-palindrome-number",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "Notice that negative numbers cannot be palindromes because of the minus sign.",
+    "Consider how you can reverse the digits of a positive number using only division and multiplication by ten.",
+    "Compare the original number with its reversed version, but be careful about potential overflow when reversing large numbers."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 19.14,
+     "prompt_tokens": 634,
+     "output_tokens": 93,
+     "tokens_per_s": 7.2
+    }
+   ],
+   "total_s": 19.1
+  },
+  {
+   "id": "0049-group-anagrams",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Hash Table",
+    "String",
+    "Sorting"
+   ],
+   "hints": [
+    "What property do all strings in the same group share regarding their letters?",
+    "Could you represent that shared property as a single string by rearranging the characters of each input string?",
+    "Notice how storing these rearranged strings as keys would automatically organize identical groups together."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 18.77,
+     "prompt_tokens": 683,
+     "output_tokens": 88,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 18.8
+  },
+  {
+   "id": "c-lab-array-sum",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "long long overflow"
+   ],
+   "hints": [
+    "What happens to the total if you add a number that is negative or very large?",
+    "Could using a variable to hold the running total while reading each new number solve it in one pass?",
+    "Be careful about whether your total variable can actually store the sum of all these numbers without overflowing."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 19.32,
+     "prompt_tokens": 637,
+     "output_tokens": 94,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 19.3
+  }
+ ]
+}

@@ -4,7 +4,7 @@ from core.hint_service import pregenerate_hints_for_question
 
 
 class Command(BaseCommand):
-    help = "Pre-generates and caches theoretical hints for questions in Redis & DB to support 400-1000 concurrent users."
+    help = "Queue LLM hint generation (all student languages) for questions so hints are ready before a lab."
 
     def add_arguments(self, parser):
         parser.add_argument("--question-id", type=int, help="Target a specific question ID")
@@ -26,16 +26,17 @@ class Command(BaseCommand):
 
         questions = list(qs[:limit])
         total = len(questions)
-        self.stdout.write(self.style.SUCCESS(f"Starting theoretical hint pre-generation for {total} question(s)..."))
+        self.stdout.write(self.style.SUCCESS(f"Queueing LLM hint generation for {total} question(s)..."))
 
         success_count = 0
         for idx, q in enumerate(questions, 1):
             self.stdout.write(f"[{idx}/{total}] Pre-warming hints for Question #{q.id}: '{q.title}'...")
             try:
                 res = pregenerate_hints_for_question(q, force=force)
-                self.stdout.write(self.style.SUCCESS(f"  ✓ Cached {len(res)} tiers for #{q.id}"))
+                summary = ", ".join(f"{lang}: {state}" for lang, state in res.items())
+                self.stdout.write(self.style.SUCCESS(f"  ✓ #{q.id}: {summary}"))
                 success_count += 1
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"  ✗ Failed for #{q.id}: {e}"))
 
-        self.stdout.write(self.style.SUCCESS(f"Done! Successfully cached hints for {success_count}/{total} questions."))
+        self.stdout.write(self.style.SUCCESS(f"Done. Queued or found hints for {success_count}/{total} questions."))

@@ -1,31 +1,125 @@
+"""
+Student-facing hint flow (T3).
+
+Hints are three progressive, LLM-generated, leak-checked hints per
+(question, language), produced by core.llm_hints in a Celery task and stored
+in Redis (L1) and GeneratedHintSet (L2, durable). Unlocking never waits on the
+model: if the set isn't ready yet the student gets a deterministic,
+language-aware fallback immediately (hint_type "diagnostic"), and that row is
+upgraded when the LLM set arrives (the UI announces the upgrade).
+
+Hints never affect points (see core.points).
+"""
 import json
 import logging
 import os
-import re
-import requests
-import uuid
-from django.conf import settings
-from django.core.cache import cache
-from django.utils import timezone
 
-from .models import StudentQuestionHint, Submission, Question
+from django.core.cache import cache
+
+from . import llm_hints
+from .models import GeneratedHintSet, StudentQuestionHint, Submission
 from .sandbox import language_for_id
 
 logger = logging.getLogger(__name__)
 
-# Default Ollama configuration (internal docker or local host)
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://elab-ollama:11434/api/chat")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
 MAX_HINTS_PER_QUESTION = 3
-HINT_CACHE_TTL = 604800  # 7 days in Redis cache
-LLM_TIMEOUT = 15  # seconds for Ollama HTTP request
+UNLOCKS_PER_MINUTE = 10  # per student, across all questions (each question is also capped at 3)
+# Sending the student's own code to the model makes hints more specific but
+# much less cacheable (one CPU generation per distinct code). Off by default.
+HINTS_USE_STUDENT_CODE = os.environ.get("HINTS_USE_STUDENT_CODE", "false").lower() == "true"
+SUPPORTED_LANGUAGES = ("c", "cpp", "python", "java")
 
-# Key for tracking in-flight LLM generation tasks in Redis
-_INFLIGHT_LLM_KEY = "elab_llm_in_flight_{question_id}_{tier}"
-_LLM_RESULT_KEY = "elab_llm_result_{question_id}_{tier}"
-_LLM_RESULT_TTL = 120  # 2 minutes — LLM should complete within this window
-_LLM_LOCK_TTL = 120  # 2 minutes — lock expires if generation hangs
-_LLM_KIND_KEY = "elab_llm_kind_{question_id}_{tier}"  # "llm" | "diagnostic"
+_INFLIGHT_KEY = "hints:inflight:{key}"
+_FAILED_KEY = "hints:failed:{key}"
+
+
+def resolve_language(question, language_id=None):
+    """Language for hints: the student's choice if the question allows it, else the question's language."""
+    default = language_for_id(question.language_id)
+    if language_id and question.allow_multiple_languages:
+        try:
+            chosen = language_for_id(int(language_id))
+        except (TypeError, ValueError):
+            chosen = default
+        if chosen in SUPPORTED_LANGUAGES:
+            return chosen
+    return default if default in SUPPORTED_LANGUAGES else llm_hints.DEFAULT_LANGUAGE
+
+
+def _code_digest(student, question):
+    if not HINTS_USE_STUDENT_CODE or student is None:
+        return "-", None
+    latest = Submission.objects.filter(student=student, question=question).order_by("-id").first()
+    code = latest.code if latest else None
+    return llm_hints.code_hash(code), code
+
+
+def get_hint_set(question, language, code_digest="-"):
+    """Return the cached/persisted list of 3 LLM hints, or None."""
+    key = llm_hints.cache_key(question, language, code_digest)
+    hints = cache.get(key)
+    if hints:
+        return hints
+    row = GeneratedHintSet.objects.filter(
+        question=question,
+        language=language,
+        difficulty=question.difficulty,
+        code_hash=code_digest,
+        prompt_version=llm_hints.PROMPT_VERSION,
+    ).first()
+    if row:
+        cache.set(key, row.hints, llm_hints.CACHE_TTL)
+        return row.hints
+    return None
+
+
+def generation_status(question, language, code_digest="-"):
+    key = llm_hints.cache_key(question, language, code_digest)
+    if get_hint_set(question, language, code_digest):
+        return "complete"
+    if cache.get(_INFLIGHT_KEY.format(key=key)):
+        return "generating"
+    if cache.get(_FAILED_KEY.format(key=key)):
+        return "unavailable"
+    return "pending"
+
+
+def enqueue_hint_generation(question, language, code_digest="-", student_id=None):
+    """Queue one background generation per (question, language, code) — deduplicated."""
+    key = llm_hints.cache_key(question, language, code_digest)
+    if cache.get(_FAILED_KEY.format(key=key)):
+        return False  # model recently failed for this key; fallback stays until backoff expires
+    if not cache.add(_INFLIGHT_KEY.format(key=key), 1, llm_hints.HINT_TIMEOUT * llm_hints.HINT_ATTEMPTS + 60):
+        return False
+    from .tasks import generate_hint_set_task
+
+    generate_hint_set_task.apply_async(args=[question.id, language, code_digest, student_id], expires=600)
+    return True
+
+
+def store_hint_set(question, language, code_digest, hints):
+    GeneratedHintSet.objects.update_or_create(
+        question=question,
+        language=language,
+        difficulty=question.difficulty,
+        code_hash=code_digest,
+        prompt_version=llm_hints.PROMPT_VERSION,
+        defaults={"hints": hints, "model_name": llm_hints.HINT_MODEL},
+    )
+    cache.set(llm_hints.cache_key(question, language, code_digest), hints, llm_hints.CACHE_TTL)
+    # Upgrade fallback rows students already unlocked for this question+language.
+    # The UI polls and announces "AI Tutor hint updated", so this is not silent.
+    for tier, text in enumerate(hints, start=1):
+        StudentQuestionHint.objects.filter(
+            question=question, language=language, hint_number=tier, hint_type="diagnostic"
+        ).update(hint_text=text, hint_type="local_llm")
+
+
+def mark_generation_finished(question, language, code_digest, failed):
+    key = llm_hints.cache_key(question, language, code_digest)
+    cache.delete(_INFLIGHT_KEY.format(key=key))
+    if failed:
+        cache.set(_FAILED_KEY.format(key=key), 1, llm_hints.FAILURE_BACKOFF)
 
 
 def get_student_hints_for_question(student, question):
@@ -53,70 +147,51 @@ def get_student_hints_for_question(student, question):
     }
 
 
-def unlock_hint_for_question(student, question):
+def can_unlock_now(student):
+    """Per-student budget so hint unlocks (and the LLM jobs they queue) can't be spammed."""
+    key = f"hint-unlock:{student.id}"
+    cache.add(key, 0, 60)
+    try:
+        return cache.incr(key) <= UNLOCKS_PER_MINUTE
+    except ValueError:
+        return True
+
+
+def unlock_hint_for_question(student, question, language=None):
     """
-    Unlocks the next progressive hint (1 to 3) on-demand.
-    Returns immediately with L4 deterministic theory hint (~20ms).
-    Queues a background Celery task for LLM hint generation (~3-8s).
-    Strictly capped at MAX_HINTS_PER_QUESTION (3 unique hints).
-    Web workers never block on Ollama — all LLM calls happen in Celery tasks.
+    Unlock the next progressive hint (1..3) for `language`. Returns immediately:
+    the LLM hint if it's ready, otherwise a language-aware fallback, while the
+    LLM set is generated in the background. Capped at MAX_HINTS_PER_QUESTION.
     """
     if not student or not student.is_authenticated:
         return None
 
-    existing_hints = list(
-        StudentQuestionHint.objects.filter(student=student, question=question).order_by("hint_number")
-    )
-    existing_count = len(existing_hints)
-
+    existing_count = StudentQuestionHint.objects.filter(student=student, question=question).count()
     if existing_count >= MAX_HINTS_PER_QUESTION:
         logger.info(f"Student {student.id} already has {existing_count} hints on Question {question.id}. Max reached.")
         return None
-
     next_hint_num = existing_count + 1
 
-    # Concurrency check for this specific student
     existing = StudentQuestionHint.objects.filter(
         student=student, question=question, hint_number=next_hint_num
     ).first()
     if existing:
         return existing
 
+    language = language or resolve_language(question)
+    code_digest, _code = _code_digest(student, question)
+    hints = get_hint_set(question, language, code_digest)
+    if hints:
+        llm_hints.bump("cache_hit")
+        hint_text, hint_type = hints[next_hint_num - 1], "local_llm"
+    else:
+        llm_hints.bump("cache_miss")
+        llm_hints.bump("fallback_used")
+        enqueue_hint_generation(question, language, code_digest, student.id if HINTS_USE_STUDENT_CODE else None)
+        hint_text = llm_hints.fallback_hints(question, language)[next_hint_num - 1]
+        hint_type = "diagnostic"
+
     latest_sub = Submission.objects.filter(student=student, question=question).order_by("-id").first()
-
-    # --- L1 CACHE: Redis fast-path (< 1ms) ---
-    cache_key = f"elab_theory_hint_{question.id}_{next_hint_num}"
-    hint_text = cache.get(cache_key)
-    # Only trust the main cache entry if it was written by the LLM;
-    # diagnostic fallback text is served as hint_type "diagnostic".
-    cached_kind = cache.get(_LLM_KIND_KEY.format(question_id=question.id, tier=next_hint_num))
-    hint_type = "diagnostic" if (hint_text and cached_kind == "diagnostic") else "local_llm"
-
-    # --- L2 CACHE: Shared Question Canonical Hint in DB (< 5ms) ---
-    if not hint_text:
-        canonical = StudentQuestionHint.objects.filter(
-            question=question, hint_number=next_hint_num, hint_type="local_llm"
-        ).exclude(hint_text="").first()
-        if canonical:
-            hint_text = canonical.hint_text
-            hint_type = "local_llm"
-            cache.set(cache_key, hint_text, timeout=HINT_CACHE_TTL)
-            cache.set(_LLM_KIND_KEY.format(question_id=question.id, tier=next_hint_num), "llm", timeout=HINT_CACHE_TTL)
-            logger.info(f"Theory hint L2 DB hit for Question {question.id} Tier {next_hint_num}.")
-    elif cached_kind == "diagnostic":
-        hint_type = "diagnostic"
-
-    # --- ASYNC LLM GENERATION: Queue Celery task, never block the web worker ---
-    # The Celery task claims the Redis slot, calls Ollama, and caches the result.
-    # Web workers never block on Ollama — they return L4 immediately.
-    # Always queue a task; the task itself deduplicates via Redis lock.
-    _enqueue_llm_generation(question.id, next_hint_num)
-
-    # --- L4 FALLBACK: Instant Deterministic Theory Engine (< 0.1ms) ---
-    if not hint_text:
-        hint_text = _generate_diagnostic_hint_for_question(question, next_hint_num, latest_sub)
-        hint_type = "diagnostic"
-
     try:
         hint_obj, _ = StudentQuestionHint.objects.get_or_create(
             student=student,
@@ -126,6 +201,7 @@ def unlock_hint_for_question(student, question):
                 "submission": latest_sub,
                 "hint_text": hint_text,
                 "hint_type": hint_type,
+                "language": language,
             },
         )
         return hint_obj
@@ -134,58 +210,26 @@ def unlock_hint_for_question(student, question):
         return None
 
 
-def _enqueue_llm_generation(question_id, tier):
+def pregenerate_hints_for_question(question, force=False, languages=None):
     """
-    Schedule a background Celery task to generate the LLM hint.
-    Called from both unlock_hint_for_question and pregenerate_hints_for_question.
-    The Celery task claims the Redis slot, calls Ollama, and caches the result.
-    The web worker never blocks on Ollama.
+    Queue LLM hint generation for a question in each language students may use,
+    so hints are ready before a lab. Returns {language: status}.
     """
-    from .tasks import generate_llm_hint_task
-    generate_llm_hint_task.apply_async(
-        args=[question_id, tier],
-        countdown=1,  # Run 1 second from now
-        expires=300,  # Expire if not picked up within 5 minutes
-    )
-    logger.info(f"Queued LLM generation for Question {question_id} Tier {tier}.")
-
-
-def pregenerate_hints_for_question(question, force=False):
-    """
-    Pre-warms and caches all 3 theoretical hint tiers for a question.
-    Queues background Celery tasks for LLM generation — web workers never block.
-    Returns a dict with hint tiers (L4 fallback if LLM not yet ready).
-    Each tier gets a queued Celery task that claims the slot and generates.
-    """
+    if languages is None:
+        languages = SUPPORTED_LANGUAGES if question.allow_multiple_languages else (resolve_language(question),)
     results = {}
-    for tier in range(1, MAX_HINTS_PER_QUESTION + 1):
-        cache_key = f"elab_theory_hint_{question.id}_{tier}"
-        if not force:
-            cached = cache.get(cache_key)
-            kind = cache.get(_LLM_KIND_KEY.format(question_id=question.id, tier=tier))
-            if cached and kind != "diagnostic":
-                results[tier] = cached
-                continue
-
-            canonical = StudentQuestionHint.objects.filter(
-                question=question, hint_number=tier, hint_type="local_llm"
-            ).exclude(hint_text="").first()
-            if canonical:
-                cache.set(cache_key, canonical.hint_text, timeout=HINT_CACHE_TTL)
-                cache.set(_LLM_KIND_KEY.format(question_id=question.id, tier=tier), "llm", timeout=HINT_CACHE_TTL)
-                results[tier] = canonical.hint_text
-                continue
-
-        # Queue a Celery task to generate the LLM hint
-        # The task claims the Redis slot, does the Ollama call, caches result.
-        # NOTE: the L4 fallback is returned directly and is NOT written to the
-        # main cache key — doing so would short-circuit the queued LLM task.
-        _enqueue_llm_generation(question.id, tier)
-
-        # Return L4 deterministic fallback immediately
-        hint_text = _generate_diagnostic_hint_for_question(question, tier)
-        results[tier] = hint_text
-
+    for language in languages:
+        key = llm_hints.cache_key(question, language)
+        if force:
+            cache.delete(key)
+            cache.delete(_FAILED_KEY.format(key=key))
+            GeneratedHintSet.objects.filter(
+                question=question, language=language, prompt_version=llm_hints.PROMPT_VERSION
+            ).delete()
+        elif get_hint_set(question, language):
+            results[language] = "cached"
+            continue
+        results[language] = "queued" if enqueue_hint_generation(question, language) else "in-progress"
     return results
 
 
@@ -195,159 +239,9 @@ def generate_hint_for_submission(submission):
     """
     if not submission or submission.status == Submission.Status.ACCEPTED:
         return None
-    return unlock_hint_for_question(submission.student, submission.question)
-
-
-def _call_local_llm(submission, hint_number, existing_hints):
-    """Legacy wrapper for submission-based LLM calls."""
-    return _call_local_llm_for_question(
-        submission.question if submission else None,
-        hint_number,
-        existing_hints,
-        submission=submission
+    return unlock_hint_for_question(
+        submission.student, submission.question, resolve_language(submission.question, submission.language_id)
     )
-
-
-def _call_local_llm_for_question(question, hint_number, existing_hints, submission=None):
-    """
-    Queries local Ollama instance with question-tailored pure theory prompt constraints.
-    Enforces ZERO CODE, NO SYNTAX, NO CODE BLOCKS.
-    Returns cleaned, purely conceptual hint text grounded in the question's theory.
-    """
-    if not question:
-        return None
-
-    module_name = question.module.name if question.module else "Computer Science Problem Solving"
-
-    # Progressive, pure theory-grounded pedagogical instructions (ZERO CODE)
-    if hint_number == 1:
-        level_instruction = (
-            "HINT TIER 1 — THEORETICAL FOUNDATIONS & PROBLEM PRINCIPLES:\n"
-            "- Explain the core Computer Science or mathematical theory that governs this problem (e.g., definitions, invariants, problem classification, or mathematical theorems).\n"
-            "- Clarify the theoretical meaning of the problem requirements and what mathematical/logical properties must hold.\n"
-            "- State the theoretical boundary conditions and edge-case limits (e.g. identity elements, empty sets, single elements, negative domains).\n"
-            "- CRITICAL: ABSOLUTELY NO CODE, NO CODE FENCES, NO SYNTAX, NO VARIABLE ASSIGNMENTS, NO PSEUDO-CODE.\n"
-            "- Format strictly as:\n"
-            "🧠 Theoretical Foundations: <2-3 sentences explaining the core CS/mathematical theory of this question>\n"
-            "🎯 Conceptual Boundary Principles: <1-2 sentences on theoretical boundaries and edge cases>"
-        )
-    elif hint_number == 2:
-        level_instruction = (
-            "HINT TIER 2 — ALGORITHMIC & PARADIGM THEORY:\n"
-            "- Explain the high-level algorithmic paradigm suited for this problem (e.g. Divide and Conquer, Dynamic Programming optimal substructure, Two-Pointer convergence, Monotonicity, Greedy choice property).\n"
-            "- Explain the conceptual logic and state transitions in abstract theoretical terms without any programming syntax.\n"
-            "- State the theoretical time and space complexity ($O(...) notation) and explain why this theoretical approach is optimal.\n"
-            "- CRITICAL: ABSOLUTELY NO CODE, NO CODE FENCES, NO SYNTAX, NO VARIABLE ASSIGNMENTS, NO PSEUDO-CODE.\n"
-            "- Format strictly as:\n"
-            "⚙️ Algorithmic Paradigm: <1-2 sentences on the theoretical paradigm, structural approach, and asymptotic complexity>\n"
-            "🛠️ Conceptual Logic Flow: <2-3 sentences explaining the theoretical reasoning and state progression>"
-        )
-    else:
-        level_instruction = (
-            "HINT TIER 3 — INVARIANT ANALYSIS & CONCEPTUAL VERIFICATION:\n"
-            "- Explain the theoretical invariants that must remain true throughout the problem execution for the solution to be proven correct.\n"
-            "- Address the theoretical failure modes or logical fallacies (e.g. inductive hypothesis failure, non-terminating reduction, state transition omission, integer range overflow in discrete domains).\n"
-            "- Provide conceptual guidance on what logical premise or invariant requires verification.\n"
-            "- CRITICAL: ABSOLUTELY NO CODE, NO CODE FENCES, NO SYNTAX, NO VARIABLE ASSIGNMENTS, NO PSEUDO-CODE.\n"
-            "- Format strictly as:\n"
-            "🔍 Invariant & Correctness Theory: <1-2 sentences on the theoretical conditions or invariants required for correctness>\n"
-            "⚠️ Conceptual Pitfalls: <1-2 sentences explaining theoretical edge conditions or logical fallacies>"
-        )
-
-    system_prompt = (
-        "You are an academic Professor of Theoretical Computer Science and Algorithmics.\n"
-        "A student is solving a programming challenge and needs conceptual, theory-based guidance.\n\n"
-        "STRICT PEDAGOGICAL POLICY (ZERO CODE TOLERANCE):\n"
-        "1. STRICTLY PURE THEORY ONLY: Base all guidance entirely on the theoretical foundations, mathematical definitions, algorithms, and computational principles of this question.\n"
-        "2. ABSOLUTELY NO CODE: NEVER output any code, code blocks, syntax statements, variable assignments, loops, function definitions, or programming language keywords (no C/C++/Python/Java syntax). Explain all ideas in conceptual English prose and mathematical concepts.\n"
-        "3. GROUNDED IN QUESTION THEORY: Directly address the theoretical nature of this specific problem title, domain, and description.\n"
-        "4. CONCISE & RIGOROUS: Keep total output under 100 words in the exact requested format.\n\n"
-        f"{level_instruction}"
-    )
-
-    # Extract failure context in purely conceptual terms
-    status_display = submission.get_status_display() if submission else "Student in-progress solution"
-    error_snippet = (submission.error_output or "").strip()[:200] if submission else "None"
-    failed_test = _extract_failed_test_info(getattr(submission, "judge_output", None)) if submission else "Unknown"
-    code_snippet = (submission.code or "").strip()[:300] if submission and getattr(submission, "code", None) else "Not provided"
-
-    prior_hints_text = ""
-    if existing_hints:
-        prior_hints_text = "Prior hints unlocked for this question:\n" + "\n".join(
-            [f"Hint {h.hint_number}: {h.hint_text}" for h in existing_hints]
-        ) + "\nProvide a NEW, DIFFERENT, HIGHER-TIER theory hint.\n"
-
-    user_prompt = (
-        f"Question Title: {question.title}\n"
-        f"Topic / Domain: {module_name}\n"
-        f"Problem Description: {question.description[:400]}\n"
-        f"Input / Output Context: {question.sample_input[:80] if question.sample_input else 'N/A'} -> {question.sample_output[:80] if question.sample_output else 'N/A'}\n"
-        f"Current Attempt Status: {status_display}\n"
-        f"Diagnostic Context: {error_snippet}\n"
-        f"First Failing Test: {failed_test}\n"
-        f"Student's Code (for context only, DO NOT quote or fix it): {code_snippet}\n\n"
-        f"{prior_hints_text}"
-        f"Provide Hint Tier #{hint_number} focusing strictly on the theory of this question. Remember: DO NOT INCLUDE ANY CODE OR CODE BLOCKS."
-    )
-
-    num_threads = int(os.environ.get("OLLAMA_NUM_THREAD", "4"))
-    num_parallel = int(os.environ.get("OLLAMA_NUM_PARALLEL", "8"))
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "options": {
-            "temperature": 0.2,
-            "num_ctx": 512,      # 4x smaller KV cache -> drastically lower memory & CPU attention latency
-            "num_predict": 90,   # Concise academic theory
-            "num_thread": num_threads,
-        },
-        "stream": False,
-    }
-
-    resp = requests.post(OLLAMA_URL, json=payload, timeout=LLM_TIMEOUT)
-    if resp.status_code == 200:
-        data = resp.json()
-        raw_text = data.get("message", {}).get("content", "").strip()
-        cleaned = _sanitize_hint(raw_text)
-        if cleaned and len(cleaned) > 20:
-            return cleaned
-
-    return None
-
-
-def _sanitize_hint(text):
-    """
-    Strips accidental code fences, syntax keywords, and conversational filler from LLM output.
-    Guarantees pure theoretical text with zero code.
-    """
-    if not text:
-        return ""
-    # Strip markdown code blocks ```...```
-    text = re.sub(r"```[\w]*\n[\s\S]*?```", "", text)
-    text = re.sub(r"```[\s\S]*?```", "", text)
-
-    # Strip conversational filler
-    text = re.sub(r"^(Sure!|Here is (your )?hint:?|Hint \d:?)\s*", "", text, flags=re.IGNORECASE)
-
-    # Filter out lines that look like raw code syntax or declarations
-    code_pattern = re.compile(
-        r"(\b(int|float|double|char|void|def|return|printf|scanf|cin|cout|malloc|free|class|struct|public|private)\b.*[;{()]|[;{}]$|#include|import )"
-    )
-    cleaned_lines = []
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if code_pattern.search(stripped):
-            continue
-        cleaned_lines.append(line)
-
-    text = "\n".join(cleaned_lines)
-    # Strip backticks so identifiers don't render as code blocks
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    return text.strip()
 
 
 def _extract_failed_test_info(judge_output):

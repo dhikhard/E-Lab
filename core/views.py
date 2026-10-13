@@ -59,9 +59,9 @@ from .services import (
     student_progress,
     update_progress,
 )
-from .tasks import evaluate_submission_task, generate_llm_hint_task
+from .tasks import evaluate_submission_task
 from .points import BASE_POINTS, award_points, leaderboard_rows, student_rank
-from .hint_service import get_student_hints_for_question, generate_hint_for_submission, unlock_hint_for_question
+from .hint_service import can_unlock_now as can_unlock_hint_now, generation_status, get_student_hints_for_question, generate_hint_for_submission, resolve_language, unlock_hint_for_question
 
 logger = logging.getLogger(__name__)
 
@@ -907,8 +907,11 @@ def unlock_question_hint_api(request, question_id):
             "success": False,
             "error": "All 3 hints have already been unlocked for this question."
         }, status=400)
+    if not can_unlock_hint_now(request.user):
+        return JsonResponse({"success": False, "error": "Please wait a moment before unlocking another hint."}, status=429)
 
-    hint_obj = unlock_hint_for_question(request.user, question)
+    language = resolve_language(question, _json_body(request).get("language_id"))
+    hint_obj = unlock_hint_for_question(request.user, question, language)
     if not hint_obj:
         return JsonResponse({
             "success": False,
@@ -953,9 +956,7 @@ def hint_status_api(request, question_id):
     question = get_object_or_404(Question, pk=question_id)
     hints_data = get_student_hints_for_question(request.user, question)
 
-    # Check if there are any cached LLM hints for this question+tier
-    next_tier = hints_data["next_hint_number"]
-    cache_key = f"elab_theory_hint_{question.id}_{next_tier}" if next_tier else None
+    language = resolve_language(question, request.GET.get("language_id"))
 
     result = {
         "unlocked_count": hints_data["unlocked_count"],
@@ -973,19 +974,9 @@ def hint_status_api(request, question_id):
         ],
     }
 
-    # If there's a pending tier, check if LLM result is cached
-    if next_tier and cache_key:
-        cached = cache.get(cache_key)
-        kind = cache.get(f"elab_llm_kind_{question.id}_{next_tier}")
-        if cached and kind != "diagnostic":
-            result["llm_hint_available"] = True
-            result["hint_generation_status"] = "complete"
-        else:
-            # Check if a generation task is in-flight (lock exists)
-            lock_key = f"elab_llm_in_flight_{question.id}_{next_tier}"
-            in_flight = cache.get(lock_key) is not None
-            result["llm_hint_available"] = False
-            result["hint_generation_status"] = "generating" if in_flight else "pending"
+    status = generation_status(question, language)
+    result["hint_generation_status"] = status
+    result["llm_hint_available"] = status == "complete"
 
     return JsonResponse(result)
 

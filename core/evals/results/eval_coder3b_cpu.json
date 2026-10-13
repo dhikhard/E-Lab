@@ -1,0 +1,420 @@
+{
+ "model": "qwen2.5-coder:3b",
+ "results": [
+  {
+   "id": "0001-two-sum",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Hash Table"
+   ],
+   "hints": [
+    "Think of the problem as finding two numbers in the list that add up to the target. You need to find their indices.",
+    "You can use a dictionary to store the numbers you've seen so far and their indices. As you iterate through the list, check if the complement of the current number (i.e., target - current number) exists in the dictionary.",
+    "Avoid using nested loops to check every pair of numbers, as that would be inefficient. Use a dictionary to store the numbers and their indices to achieve a time complexity of O(n)."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 21.69,
+     "prompt_tokens": 515,
+     "output_tokens": 157,
+     "tokens_per_s": 11.0
+    }
+   ],
+   "total_s": 21.7
+  },
+  {
+   "id": "0020-valid-parentheses",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "String",
+    "Stack"
+   ],
+   "hints": [
+    "Understand that a valid string of parentheses must have matching pairs and be properly nested.",
+    "Consider using a stack to keep track of opening parentheses and match them with closing ones as you iterate through the string.",
+    "Be cautious of cases where the string has unmatched opening parentheses or closing ones at the end."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 12.51,
+     "prompt_tokens": 441,
+     "output_tokens": 96,
+     "tokens_per_s": 11.1
+    }
+   ],
+   "total_s": 12.5
+  },
+  {
+   "id": "0007-reverse-integer",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "Understand the problem by examining the constraints and examples provided. Note that the task involves reversing the digits of an integer while ensuring it remains within the 32-bit signed integer range.",
+    "Consider how you can handle both positive and negative numbers separately. Think about how you can extract and reverse the digits of the integer.",
+    "Be cautious of potential overflow when reversing the digits. Consider using long to handle intermediate results and then check if the final result is within the 32-bit range before returning it."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 16.96,
+     "prompt_tokens": 486,
+     "output_tokens": 137,
+     "tokens_per_s": 10.9
+    }
+   ],
+   "total_s": 17.0
+  },
+  {
+   "id": "0003-longest-substring-without-repeating-characters",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Hash Table",
+    "String",
+    "Sliding Window"
+   ],
+   "hints": [
+    "Think about how you would solve this problem if you were to manually check each substring of the string to see if it contains duplicate characters.",
+    "Consider using a sliding window approach to keep track of the characters in the current substring and update the maximum length as you iterate through the string.",
+    "Be mindful of the need to update the start of the window when a duplicate character is found to ensure the substring remains valid."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 14.93,
+     "prompt_tokens": 437,
+     "output_tokens": 118,
+     "tokens_per_s": 10.7
+    }
+   ],
+   "total_s": 14.9
+  },
+  {
+   "id": "0056-merge-intervals",
+   "language": "python",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Sorting"
+   ],
+   "hints": [
+    "Understand that intervals are represented as lists of two numbers, where the first number is the start and the second is the end.",
+    "Sort the intervals based on their start times to simplify the merging process.",
+    "Use a variable to keep track of the current merged interval and merge new intervals as you iterate through the sorted list."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.57,
+     "prompt_tokens": 506,
+     "output_tokens": 101,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 11.6
+  },
+  {
+   "id": "0070-climbing-stairs",
+   "language": "java",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math",
+    "Dynamic Programming",
+    "Memoization"
+   ],
+   "hints": [
+    "Think of the problem as a sequence of steps. You can either take one step or two steps at a time.",
+    "Notice that the number of ways to reach the nth step is the sum of the ways to reach the (n-1)th step and the (n-2)th step.",
+    "This problem is a classic example of dynamic programming where you build up the solution from smaller subproblems."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 14.43,
+     "prompt_tokens": 443,
+     "output_tokens": 138,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 14.4
+  },
+  {
+   "id": "0053-maximum-subarray",
+   "language": "c",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Divide and Conquer",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "Think about how you might add numbers together to get a sum. Consider the possibility that the subarray could start at the beginning of the array, or it could start somewhere in the middle.",
+    "For the O(n) solution, use a variable to keep track of the current subarray sum and update it as you iterate through the array. If the current sum becomes negative, reset it to zero because a negative sum would decrease the sum of any subsequent subarray.",
+    "For the divide and conquer approach, split the array into two halves, find the maximum subarray sum in each half, and then find the maximum subarray sum that crosses the midpoint. The key insight is that the maximum subarray sum that crosses the midpoint must include at least one element from each half."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 19.97,
+     "prompt_tokens": 478,
+     "output_tokens": 191,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 20.0
+  },
+  {
+   "id": "0200-number-of-islands",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Depth-First Search",
+    "Breadth-First Search",
+    "Union Find",
+    "Matrix"
+   ],
+   "hints": [
+    "Think of the grid as a map where '1's represent land and '0's represent water. An island is a group of connected '1's.",
+    "To count the number of islands, you can use a depth-first search (DFS) approach. Traverse the grid and mark visited '1's to avoid counting them multiple times.",
+    "Be careful not to mark '1's that are part of a larger island. Use a separate function to mark all connected '1's in a DFS traversal."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 15.45,
+     "prompt_tokens": 575,
+     "output_tokens": 136,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 15.4
+  },
+  {
+   "id": "0121-best-time-to-buy-and-sell-stock",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "The problem asks you to find the maximum profit from buying and selling a stock. You need to consider each day as a potential selling day and find the best buying day for that selling day.",
+    "To solve this, you can iterate through the list of prices and keep track of the minimum price encountered so far. For each price, calculate the potential profit by subtracting the minimum price from the current price.",
+    "The key insight is to use a single variable to keep track of the minimum price encountered so far, which helps in calculating the potential profit efficiently."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 18.83,
+     "prompt_tokens": 512,
+     "output_tokens": 175,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 18.8
+  },
+  {
+   "id": "0322-coin-change",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming",
+    "Breadth-First Search"
+   ],
+   "hints": [
+    "Think about how you would approach this problem if you had an unlimited supply of each coin type. What would you do to find the fewest coins needed?",
+    "Consider using dynamic programming to solve this problem. You can create an array where each index represents the amount of money, and the value at that index represents the fewest coins needed to make that amount.",
+    "Be cautious of the common pitfall of using a greedy algorithm here. A greedy approach might not always give the correct result because it doesn't consider the possibility of using multiple coins of the same denomination."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 16.22,
+     "prompt_tokens": 515,
+     "output_tokens": 148,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 16.2
+  },
+  {
+   "id": "0042-trapping-rain-water",
+   "language": "python",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Two Pointers",
+    "Dynamic Programming",
+    "Stack",
+    "Monotonic Stack"
+   ],
+   "hints": [
+    "Think about how water can be trapped between two bars. The key is to find the maximum height of bars to the left and right of each bar.",
+    "Use two pointers to traverse the array from both ends, keeping track of the maximum heights encountered so far.",
+    "The amount of water trapped at a particular index is determined by the minimum of the maximum heights from the left and right minus the height of the bar at that index."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 13.5,
+     "prompt_tokens": 486,
+     "output_tokens": 122,
+     "tokens_per_s": 10.3
+    }
+   ],
+   "total_s": 13.5
+  },
+  {
+   "id": "0004-median-of-two-sorted-arrays",
+   "language": "cpp",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Binary Search",
+    "Divide and Conquer"
+   ],
+   "hints": [
+    "The problem asks for the median of two sorted arrays. The median is the middle value when all numbers are sorted.",
+    "To achieve O(log(m+n)) time complexity, you can use a binary search approach to find the k-th smallest element in the combined sorted array. This involves comparing elements from both arrays and discarding halves.",
+    "The key insight is to use binary search to partition the arrays in such a way that the left partition contains elements less than or equal to the right partition. This ensures that the median is correctly found by comparing elements from the partitions."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 17.75,
+     "prompt_tokens": 521,
+     "output_tokens": 163,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 17.8
+  },
+  {
+   "id": "0009-palindrome-number",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "Think about what makes a number a palindrome. It reads the same forwards and backwards.",
+    "Consider how you can reverse a number without converting it to a string. You can do this by repeatedly extracting the last digit and building the reversed number.",
+    "Be careful with negative numbers. They cannot be palindromes because of the negative sign."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.06,
+     "prompt_tokens": 420,
+     "output_tokens": 104,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 11.1
+  },
+  {
+   "id": "0049-group-anagrams",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Hash Table",
+    "String",
+    "Sorting"
+   ],
+   "hints": [
+    "Anagrams are strings that contain the same characters in any order. To solve this problem, you need to group strings that are anagrams of each other.",
+    "You can use a HashMap to store the sorted version of each string as the key and the list of anagrams as the value. This way, all anagrams will be grouped together.",
+    "Be cautious of edge cases, such as empty strings or strings with the same characters but different orders. Ensure that you handle these cases appropriately."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 16.05,
+     "prompt_tokens": 466,
+     "output_tokens": 154,
+     "tokens_per_s": 10.4
+    }
+   ],
+   "total_s": 16.1
+  },
+  {
+   "id": "c-lab-array-sum",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "long long overflow"
+   ],
+   "hints": [
+    "Understand the problem: You need to read an integer n, followed by n integers, and then output their sum.",
+    "Think about how to store and process the input numbers. You can use an array to hold the numbers.",
+    "Be aware of potential overflow issues when summing the numbers. Ensure your sum variable is large enough to hold the result."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.08,
+     "prompt_tokens": 423,
+     "output_tokens": 107,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 11.1
+  }
+ ]
+}

@@ -1631,14 +1631,19 @@ public class Main {
 
   // Poll the hint status endpoint briefly so an asynchronously-generated
   // LLM hint can replace the instant deterministic fallback without reload.
+  function currentHintLanguageId() {
+    const sel = document.getElementById("language-select");
+    return sel ? sel.value : "{{ question.language_id }}";
+  }
+
   function pollForLlmHintUpgrade(questionId) {
     if (!questionId) return;
     let attempts = 0;
-    const maxAttempts = 12;  // ~36s total
+    const maxAttempts = 30;  // ~90s: CPU-only generation of a new hint set can take a while
     const timer = setInterval(async function() {
       attempts += 1;
       try {
-        const resp = await fetch(`/questions/${questionId}/hints/status/`);
+        const resp = await fetch(`/questions/${questionId}/hints/status/?language_id=${encodeURIComponent(currentHintLanguageId())}`);
         if (!resp.ok) throw new Error("status fetch failed");
         const data = await resp.json();
         const hasDiagnostic = (data.hints || []).some(h => h.hint_type === "diagnostic");
@@ -1650,7 +1655,7 @@ public class Main {
             title: "💡 AI Tutor hint updated",
             message: "A question-tailored hint from the local AI tutor is ready."
           });
-        } else if (attempts >= maxAttempts || data.hint_generation_status === "complete") {
+        } else if (attempts >= maxAttempts || data.hint_generation_status === "complete" || data.hint_generation_status === "unavailable") {
           clearInterval(timer);
         }
       } catch (e) {
@@ -1687,7 +1692,8 @@ public class Main {
           headers: {
             "Content-Type": "application/json",
             "X-CSRFToken": csrfToken
-          }
+          },
+          body: JSON.stringify({ language_id: currentHintLanguageId() })
         });
 
         if (!resp.ok) {
@@ -1702,7 +1708,7 @@ public class Main {
         showAnimatedNotification({
           type: "info",
           title: `💡 AI Tutor Hint #${hintNum} Unlocked!`,
-          message: "Pure theoretical and conceptual guidance has been revealed without code."
+          message: "A nudge in the right direction — no code, no answers."
         });
       } catch (err) {
         console.warn("Hint unlock error:", err);

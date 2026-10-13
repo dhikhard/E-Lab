@@ -1,0 +1,430 @@
+{
+ "model": "qwen3.5:4b",
+ "results": [
+  {
+   "id": "0001-two-sum",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Hash Table"
+   ],
+   "hints": [
+    "If you know one number in the pair, how can you figure out what the other number must be?",
+    "As you look at each number, could you check if its partner has already been seen before and remember both values together?",
+    "In Python, when you store numbers in a list while checking them one by one, you might need to use a different structure to quickly find if the required partner exists."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.32,
+     "prompt_tokens": 779,
+     "output_tokens": 117,
+     "tokens_per_s": 7.0
+    }
+   ],
+   "total_s": 23.3
+  },
+  {
+   "id": "0020-valid-parentheses",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "String",
+    "Stack"
+   ],
+   "hints": [
+    "What happens if you encounter a closing bracket but haven't seen its matching opening bracket yet?",
+    "Could you keep track of which opening bracket is waiting for its match as you scan through the string from left to right?",
+    "In C, make sure your storage for these brackets is large enough to hold the entire input string if needed."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 20.75,
+     "prompt_tokens": 693,
+     "output_tokens": 102,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 20.8
+  },
+  {
+   "id": "0007-reverse-integer",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens to the sign of the number when you reverse it, and how does that affect the comparison with the bounds?",
+    "If you build the reversed value digit by digit using multiplication and addition, what specific property of the numbers near the limits makes a direct check dangerous without extra space?",
+    "In Java 17, try multiplying your current result by ten before adding the next digit and observe if the intermediate calculation exceeds the valid range even when the final answer would fit."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 25.83,
+     "prompt_tokens": 748,
+     "output_tokens": 131,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 25.8
+  },
+  {
+   "id": "0003-longest-substring-without-repeating-characters",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Hash Table",
+    "String",
+    "Sliding Window"
+   ],
+   "hints": [
+    "Consider what happens to the substring when a character you have already seen appears again inside it.",
+    "If you keep track of where each character last appeared while moving forward through the string, how could that help you decide which part of the current substring to discard?",
+    "In C++, make sure your distance calculations use long long if necessary, and verify that your window never extends beyond the actual length of the string."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 24.2,
+     "prompt_tokens": 693,
+     "output_tokens": 117,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 24.2
+  },
+  {
+   "id": "0056-merge-intervals",
+   "language": "python",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 20.64,
+     "prompt_tokens": 769,
+     "output_tokens": 98,
+     "tokens_per_s": 7.1
+    },
+    {
+     "latency_s": 15.12,
+     "prompt_tokens": 769,
+     "output_tokens": 106,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 35.8
+  },
+  {
+   "id": "0070-climbing-stairs",
+   "language": "java",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math",
+    "Dynamic Programming",
+    "Memoization"
+   ],
+   "hints": [
+    "Notice that the number of ways to reach step n depends on how you arrived at step n-1 and n-2.",
+    "If you keep track of only the counts needed for the next position, could you calculate the result without storing all previous values?",
+    "Remember that adding two large integers in Java might overflow if they exceed the maximum value for a standard integer type."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 21.81,
+     "prompt_tokens": 705,
+     "output_tokens": 110,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 21.8
+  },
+  {
+   "id": "0053-maximum-subarray",
+   "language": "c",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Divide and Conquer",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What happens to the running total if you encounter a negative number that would make it smaller than what you had before?",
+    "Can you update your current sum by adding the next element and then deciding whether to keep going or start fresh based on that result?",
+    "Consider how the constraints on the values and array length affect the range of integers your variables can hold."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.58,
+     "prompt_tokens": 730,
+     "output_tokens": 107,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 22.6
+  },
+  {
+   "id": "0200-number-of-islands",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Depth-First Search",
+    "Breadth-First Search",
+    "Union Find",
+    "Matrix"
+   ],
+   "hints": [
+    "What happens to a piece of land once you have confirmed it belongs to an island?",
+    "Can you visit every connected group of lands in just one pass through the grid without retracing your steps?",
+    "When using a container to track visited cells, ensure you mark a cell as seen immediately after processing it so you don't count the same land twice."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.71,
+     "prompt_tokens": 831,
+     "output_tokens": 106,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.7
+  },
+  {
+   "id": "0121-best-time-to-buy-and-sell-stock",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What happens to your profit if you buy on a day when the price is very low compared to all previous days?",
+    "As you move through the list, how could you keep track of the lowest price seen so far and compare it to today's price?",
+    "Remember that in Python, if your calculation results in a negative number for profit, you should return zero instead."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.52,
+     "prompt_tokens": 773,
+     "output_tokens": 110,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 22.5
+  },
+  {
+   "id": "0322-coin-change",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming",
+    "Breadth-First Search"
+   ],
+   "hints": [
+    "Consider what happens if you try to build the total amount one coin at a time, starting from zero.",
+    "If you know the fewest coins needed for a smaller amount, how does that help you figure out the count for the next larger amount?",
+    "In Java 17, initializing your array with a very large number instead of zero ensures that any reachable sum will naturally replace it."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 23.45,
+     "prompt_tokens": 777,
+     "output_tokens": 114,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 23.4
+  },
+  {
+   "id": "0042-trapping-rain-water",
+   "language": "python",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Two Pointers",
+    "Dynamic Programming",
+    "Stack",
+    "Monotonic Stack"
+   ],
+   "hints": [
+    "What prevents water from being trapped above a bar if there isn't a taller wall somewhere to its left and another taller wall somewhere to its right?",
+    "Can you determine the amount of water above each bar by looking at the tallest walls that exist on both sides up to that point, without needing to know the exact heights in between?",
+    "If you iterate through the list and keep track of the maximum height seen so far from the start and the maximum height seen so far from the end, how would you calculate the water level at each position using those two values?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 27.66,
+     "prompt_tokens": 747,
+     "output_tokens": 149,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 27.7
+  },
+  {
+   "id": "0004-median-of-two-sorted-arrays",
+   "language": "cpp",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Binary Search",
+    "Divide and Conquer"
+   ],
+   "hints": [
+    "Consider what happens if you merge the two arrays into one; how does that help you visualize finding the middle value?",
+    "Since merging takes too long, think about how you can maintain a balance between the left and right halves of the combined data without actually combining them.",
+    "Be very careful when calculating your boundaries, as using standard integers might cause overflow if the sum of elements exceeds their individual ranges."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 22.65,
+     "prompt_tokens": 776,
+     "output_tokens": 115,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 22.6
+  },
+  {
+   "id": "0009-palindrome-number",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "Negative numbers cannot be palindromes because of the minus sign.",
+    "If you reverse the digits of a positive number in your array, how would you compare it to the original value?",
+    "When reversing large integers using integer arithmetic, check if the result exceeds the maximum limit for a signed 32-bit integer."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 20.34,
+     "prompt_tokens": 672,
+     "output_tokens": 100,
+     "tokens_per_s": 7.2
+    }
+   ],
+   "total_s": 20.3
+  },
+  {
+   "id": "0049-group-anagrams",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Hash Table",
+    "String",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 3: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 1: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 20.92,
+     "prompt_tokens": 731,
+     "output_tokens": 101,
+     "tokens_per_s": 7.1
+    },
+    {
+     "latency_s": 16.09,
+     "prompt_tokens": 731,
+     "output_tokens": 113,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 37.0
+  },
+  {
+   "id": "c-lab-array-sum",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "long long overflow"
+   ],
+   "hints": [
+    "Consider what happens if you add a very large positive number and a very large negative number to your running total.",
+    "Would storing the sum in a standard integer variable cause issues when adding numbers near the boundary of its range?",
+    "In C, check if using a larger integer type for the accumulator prevents the program from crashing or producing incorrect results."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 21.02,
+     "prompt_tokens": 675,
+     "output_tokens": 104,
+     "tokens_per_s": 7.1
+    }
+   ],
+   "total_s": 21.0
+  }
+ ]
+}

@@ -1,0 +1,478 @@
+{
+ "model": "qwen2.5-coder:3b",
+ "results": [
+  {
+   "id": "0001-two-sum",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Hash Table"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 3: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 2: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 2: names a technique /\\bcomplement\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 15.38,
+     "prompt_tokens": 708,
+     "output_tokens": 98,
+     "tokens_per_s": 10.4
+    },
+    {
+     "latency_s": 12.96,
+     "prompt_tokens": 708,
+     "output_tokens": 132,
+     "tokens_per_s": 10.3
+    }
+   ],
+   "total_s": 28.4
+  },
+  {
+   "id": "0020-valid-parentheses",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "String",
+    "Stack"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bstacks?\\b/",
+    "hint 3: names a technique /\\bstacks?\\b/",
+    "hint 2: names a technique /\\bstacks?\\b/",
+    "hint 3: names a technique /\\bstacks?\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 12.87,
+     "prompt_tokens": 634,
+     "output_tokens": 73,
+     "tokens_per_s": 10.5
+    },
+    {
+     "latency_s": 10.04,
+     "prompt_tokens": 634,
+     "output_tokens": 104,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 22.9
+  },
+  {
+   "id": "0007-reverse-integer",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens if the input number is negative? How can you handle it?",
+    "Can you reverse the digits of the number without converting it to a string?",
+    "What is the maximum and minimum value a 32-bit integer can hold? How can you check if the reversed number exceeds these limits?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 15.45,
+     "prompt_tokens": 679,
+     "output_tokens": 96,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 15.5
+  },
+  {
+   "id": "0003-longest-substring-without-repeating-characters",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Hash Table",
+    "String",
+    "Sliding Window"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bsliding[- ]window\\b/",
+    "hint 3: names a technique /\\bhash(ing| ?maps?| ?sets?| ?tables?)?\\b/",
+    "hint 3: names a technique /\\b(unordered_)?map\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 14.54,
+     "prompt_tokens": 630,
+     "output_tokens": 92,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 8.71,
+     "prompt_tokens": 630,
+     "output_tokens": 90,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 23.3
+  },
+  {
+   "id": "0056-merge-intervals",
+   "language": "python",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 10.21,
+     "prompt_tokens": 699,
+     "output_tokens": 88,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 8.93,
+     "prompt_tokens": 699,
+     "output_tokens": 93,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 19.1
+  },
+  {
+   "id": "0070-climbing-stairs",
+   "language": "java",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math",
+    "Dynamic Programming",
+    "Memoization"
+   ],
+   "hints": [
+    "What is the base case for the number of ways to climb 0 or 1 step?",
+    "Can you think of a relationship between the number of ways to climb n steps and the number of ways to climb n-1 and n-2 steps?",
+    "Remember that the number of ways to climb n steps is the sum of the number of ways to climb n-1 and n-2 steps."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 12.4,
+     "prompt_tokens": 636,
+     "output_tokens": 117,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 12.4
+  },
+  {
+   "id": "0053-maximum-subarray",
+   "language": "c",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Divide and Conquer",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What does a subarray represent in terms of the array?",
+    "Can you think of a way to keep track of the maximum sum encountered so far and update it as you iterate through the array?",
+    "Consider how the maximum sum changes when you encounter a negative number or when you add a positive number to the current subarray sum."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.3,
+     "prompt_tokens": 671,
+     "output_tokens": 102,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 11.3
+  },
+  {
+   "id": "0200-number-of-islands",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Depth-First Search",
+    "Breadth-First Search",
+    "Union Find",
+    "Matrix"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bBFS\\b/",
+    "hint 2: names a technique /\\bDFS\\b/",
+    "hint 2: names a technique /\\bdepth[- ]first\\b/",
+    "hint 2: names a technique /\\bbreadth[- ]first\\b/",
+    "hint 3: names a technique /\\bDFS\\b/",
+    "hint 3: names a technique /\\bDFS\\b/",
+    "hint 3: names a technique /\\bdepth[- ]first\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 13.93,
+     "prompt_tokens": 768,
+     "output_tokens": 119,
+     "tokens_per_s": 10.4
+    },
+    {
+     "latency_s": 8.39,
+     "prompt_tokens": 768,
+     "output_tokens": 87,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 22.3
+  },
+  {
+   "id": "0121-best-time-to-buy-and-sell-stock",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What happens if the stock price increases every day?",
+    "Can you keep track of the minimum price seen so far and calculate the potential profit at each step?",
+    "Remember that you only need to sell after you have bought, so the minimum price should be updated before any potential sale."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 10.65,
+     "prompt_tokens": 705,
+     "output_tokens": 92,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 10.7
+  },
+  {
+   "id": "0322-coin-change",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming",
+    "Breadth-First Search"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 3: names a technique /\\bdynamic programming\\b/",
+    "hint 3: names a technique /\\bdynamic programming\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.34,
+     "prompt_tokens": 708,
+     "output_tokens": 98,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 10.1,
+     "prompt_tokens": 708,
+     "output_tokens": 105,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 21.4
+  },
+  {
+   "id": "0042-trapping-rain-water",
+   "language": "python",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Two Pointers",
+    "Dynamic Programming",
+    "Stack",
+    "Monotonic Stack"
+   ],
+   "hints": [
+    "How does the water level change as you move from left to right?",
+    "What can you remember about the heights of the bars you have already encountered?",
+    "Think about how the water level is determined by the minimum height of the bars on either side."
+   ],
+   "fallback_used": false,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 1: names a technique /\\b(unordered_)?map\\b/",
+    "hint 2: names a technique /\\btwo[- ]pointers?\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 16.26,
+     "prompt_tokens": 679,
+     "output_tokens": 152,
+     "tokens_per_s": 10.4
+    },
+    {
+     "latency_s": 8.21,
+     "prompt_tokens": 679,
+     "output_tokens": 86,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 24.5
+  },
+  {
+   "id": "0004-median-of-two-sorted-arrays",
+   "language": "cpp",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Binary Search",
+    "Divide and Conquer"
+   ],
+   "hints": [
+    "What happens if the total number of elements is odd or even?",
+    "Can you find a way to divide the arrays into two parts such that the maximum of the left part is less than or equal to the minimum of the right part?",
+    "Think about how to efficiently find the partition points in the arrays to ensure the median is calculated correctly."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.96,
+     "prompt_tokens": 714,
+     "output_tokens": 104,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 12.0
+  },
+  {
+   "id": "0009-palindrome-number",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens if x is negative?",
+    "Can you reverse the digits of x without using extra space?",
+    "Think about how you can compare the reversed number with the original number."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 7.82,
+     "prompt_tokens": 613,
+     "output_tokens": 71,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 7.8
+  },
+  {
+   "id": "0049-group-anagrams",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Hash Table",
+    "String",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 3: names a technique /\\bhash(ing| ?maps?| ?sets?| ?tables?)?\\b/",
+    "hint 3: names a technique /\\b(unordered_)?map\\b/",
+    "hint 2: names a technique /\\bsort(ed|ing)? (the|them|it|each|both|by)\\b/",
+    "hint 3: names a technique /\\bhash(ing| ?maps?| ?sets?| ?tables?)?\\b/",
+    "hint 3: names a technique /\\bHashMap\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.12,
+     "prompt_tokens": 659,
+     "output_tokens": 104,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 6.85,
+     "prompt_tokens": 659,
+     "output_tokens": 71,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 18.0
+  },
+  {
+   "id": "c-lab-array-sum",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "long long overflow"
+   ],
+   "hints": [
+    "What happens if the input is empty?",
+    "Can you use a loop to iterate through the input and keep a running total?",
+    "Remember to handle the case where the input is just one number."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 7.96,
+     "prompt_tokens": 616,
+     "output_tokens": 75,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 8.0
+  }
+ ]
+}

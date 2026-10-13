@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
 from .models import (
+    GeneratedHintSet,
     PointsLedger,
     ProctoringEvent,
     AssignedQuestion,
@@ -207,3 +208,18 @@ class PointsLedgerAdmin(admin.ModelAdmin):
     list_filter = ("difficulty", "formula_version")
     search_fields = ("student__username", "student__usn", "question__title")
     raw_id_fields = ("student", "question", "subquestion", "submission")
+
+
+@admin.register(GeneratedHintSet)
+class GeneratedHintSetAdmin(admin.ModelAdmin):
+    """Faculty can review and edit LLM hints before/after students see them."""
+    list_display = ("question", "language", "difficulty", "model_name", "prompt_version", "created_at")
+    list_filter = ("language", "difficulty", "model_name", "prompt_version")
+    search_fields = ("question__title",)
+    raw_id_fields = ("question",)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        from django.core.cache import cache
+        from . import llm_hints
+        cache.set(llm_hints.cache_key(obj.question, obj.language, obj.code_hash), obj.hints, llm_hints.CACHE_TTL)

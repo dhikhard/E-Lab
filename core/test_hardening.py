@@ -125,7 +125,7 @@ class LabRecordLatestSubmissionTests(_Base):
 class HintGatingTests(_Base):
     """F16/F17: hint unlock gated to assigned questions; status API doesn't leak locked hints."""
 
-    @patch("core.hint_service._enqueue_llm_generation")
+    @patch("core.hint_service.enqueue_hint_generation")
     def test_unlock_unassigned_question_rejected(self, enqueue):
         r = self.client.post(f"/questions/{self.hard.id}/hints/unlock/")
         self.assertEqual(r.status_code, 403)

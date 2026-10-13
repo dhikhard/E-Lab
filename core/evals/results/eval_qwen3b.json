@@ -1,0 +1,456 @@
+{
+ "model": "qwen2.5:3b",
+ "results": [
+  {
+   "id": "0001-two-sum",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Hash Table"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 2: names a technique /\\bcomplement\\b/",
+    "hint 3: names a technique /\\bcomplement\\b/",
+    "hint 2: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 2: names a technique /\\bcomplement\\b/",
+    "hint 3: names a technique /\\bdictionar(y|ies)\\b/",
+    "hint 3: names a technique /\\bcomplement\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 19.78,
+     "prompt_tokens": 708,
+     "output_tokens": 116,
+     "tokens_per_s": 10.4
+    },
+    {
+     "latency_s": 10.59,
+     "prompt_tokens": 708,
+     "output_tokens": 110,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 30.4
+  },
+  {
+   "id": "0020-valid-parentheses",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "String",
+    "Stack"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bstacks?\\b/",
+    "hint 3: names a technique /\\bstacks?\\b/",
+    "hint 1: names a technique /\\bstacks?\\b/",
+    "hint 2: names a technique /\\bstacks?\\b/",
+    "hint 3: names a technique /\\bstacks?\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 13.9,
+     "prompt_tokens": 634,
+     "output_tokens": 86,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 9.43,
+     "prompt_tokens": 634,
+     "output_tokens": 98,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 23.3
+  },
+  {
+   "id": "0007-reverse-integer",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens if x is negative and you reverse its digits? How does this affect the final result?",
+    "Can you reverse the digits of x and then adjust for the sign, or do you need to handle the sign in the reversal process?",
+    "Consider the overflow issue. What could cause the reversed number to exceed the 32-bit signed integer range?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 16.39,
+     "prompt_tokens": 679,
+     "output_tokens": 107,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 16.4
+  },
+  {
+   "id": "0003-longest-substring-without-repeating-characters",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Hash Table",
+    "String",
+    "Sliding Window"
+   ],
+   "hints": [
+    "What happens if a character repeats within the substring you are currently examining?",
+    "Could you use a data structure to keep track of the last seen position of each character to avoid duplicates?",
+    "Consider the scenario where you encounter a character that you have seen before within the current substring. How does this affect your solution?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 15.03,
+     "prompt_tokens": 630,
+     "output_tokens": 98,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 15.0
+  },
+  {
+   "id": "0056-merge-intervals",
+   "language": "python",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Sorting"
+   ],
+   "hints": [
+    "What happens if the end of one interval coincides with the start of another?",
+    "Could you keep track of the maximum end point you've encountered so far to merge intervals efficiently?",
+    "Consider how you might handle intervals that overlap at their ends to ensure they are merged correctly."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 10.51,
+     "prompt_tokens": 699,
+     "output_tokens": 91,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 10.5
+  },
+  {
+   "id": "0070-climbing-stairs",
+   "language": "java",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math",
+    "Dynamic Programming",
+    "Memoization"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\brecurrence\\b/",
+    "hint 2: names a technique /\\brecurrence\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 12.18,
+     "prompt_tokens": 636,
+     "output_tokens": 114,
+     "tokens_per_s": 10.5
+    },
+    {
+     "latency_s": 13.42,
+     "prompt_tokens": 636,
+     "output_tokens": 141,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 25.6
+  },
+  {
+   "id": "0053-maximum-subarray",
+   "language": "c",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Divide and Conquer",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What happens if the largest sum subarray includes the first and last elements of the array?",
+    "Could you find a way to keep track of both the current maximum and the maximum found so far in a single pass?",
+    "Consider what would happen if the maximum sum subarray crosses the array's boundaries; how could you handle such cases?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.37,
+     "prompt_tokens": 671,
+     "output_tokens": 103,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 11.4
+  },
+  {
+   "id": "0200-number-of-islands",
+   "language": "cpp",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Depth-First Search",
+    "Breadth-First Search",
+    "Union Find",
+    "Matrix"
+   ],
+   "hints": [
+    "What happens if an island is completely surrounded by water (i.e., it's on the edge of the grid)?",
+    "Can you think of a way to mark visited islands to avoid counting them multiple times?",
+    "How can you efficiently mark an island as visited without checking all its neighbors?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.25,
+     "prompt_tokens": 768,
+     "output_tokens": 93,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 11.3
+  },
+  {
+   "id": "0121-best-time-to-buy-and-sell-stock",
+   "language": "python",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming"
+   ],
+   "hints": [
+    "What happens if the highest price you see so far is also the lowest price you see so far?",
+    "Can you keep track of the lowest price seen so far and the maximum profit that can be achieved?",
+    "What if the maximum profit is achieved when the lowest price is the last element in the list?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.09,
+     "prompt_tokens": 705,
+     "output_tokens": 97,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 11.1
+  },
+  {
+   "id": "0322-coin-change",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Dynamic Programming",
+    "Breadth-First Search"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bdynamic programming\\b/",
+    "hint 3: names a technique /\\bDP\\b/",
+    "hint 2: names a technique /\\bdynamic programming\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 14.75,
+     "prompt_tokens": 708,
+     "output_tokens": 133,
+     "tokens_per_s": 10.5
+    },
+    {
+     "latency_s": 10.12,
+     "prompt_tokens": 708,
+     "output_tokens": 106,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 24.9
+  },
+  {
+   "id": "0042-trapping-rain-water",
+   "language": "python",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Two Pointers",
+    "Dynamic Programming",
+    "Stack",
+    "Monotonic Stack"
+   ],
+   "hints": [
+    "What happens if the water cannot be trapped at the end of a bar?",
+    "Can you use the previous bar's height to determine if water can be trapped at the current position?",
+    "Consider the implications of water being trapped between two bars of different heights."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 9.91,
+     "prompt_tokens": 679,
+     "output_tokens": 87,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 9.9
+  },
+  {
+   "id": "0004-median-of-two-sorted-arrays",
+   "language": "cpp",
+   "difficulty": "hard",
+   "crux_terms": [
+    "Array",
+    "Binary Search",
+    "Divide and Conquer"
+   ],
+   "hints": [
+    "What happens if the combined array has an even number of elements? How does this affect the median calculation?",
+    "Can you think of a way to merge the arrays while maintaining the sorted order to find the median more efficiently?",
+    "Consider the median as the average of the middle two elements. How can you avoid merging the entire arrays to find these elements?"
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 12.18,
+     "prompt_tokens": 714,
+     "output_tokens": 106,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 12.2
+  },
+  {
+   "id": "0009-palindrome-number",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "Math"
+   ],
+   "hints": [
+    "What happens if x is negative? How does this affect the palindrome check?",
+    "Can you determine if x is a palindrome by comparing only half of its digits, considering the sign and the last digit?",
+    "Think about how reversing the digits of x and comparing it to x itself might lead to an incorrect result for negative numbers."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 10.62,
+     "prompt_tokens": 613,
+     "output_tokens": 101,
+     "tokens_per_s": 10.6
+    }
+   ],
+   "total_s": 10.6
+  },
+  {
+   "id": "0049-group-anagrams",
+   "language": "java",
+   "difficulty": "medium",
+   "crux_terms": [
+    "Array",
+    "Hash Table",
+    "String",
+    "Sorting"
+   ],
+   "hints": null,
+   "fallback_used": true,
+   "attempts": 2,
+   "guard_reasons": [
+    "hint 2: names a technique /\\bhash(ing| ?maps?| ?sets?| ?tables?)?\\b/",
+    "hint 2: names a technique /\\bHashMap\\b/",
+    "hint 2: names a technique /\\b(unordered_)?map\\b/",
+    "hint 3: names a technique /\\b(unordered_)?map\\b/"
+   ],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 11.96,
+     "prompt_tokens": 659,
+     "output_tokens": 113,
+     "tokens_per_s": 10.6
+    },
+    {
+     "latency_s": 9.6,
+     "prompt_tokens": 659,
+     "output_tokens": 100,
+     "tokens_per_s": 10.5
+    }
+   ],
+   "total_s": 21.6
+  },
+  {
+   "id": "c-lab-array-sum",
+   "language": "c",
+   "difficulty": "easy",
+   "crux_terms": [
+    "long long overflow"
+   ],
+   "hints": [
+    "What should happen if the sum of the numbers exceeds the maximum value an integer can hold?",
+    "Could you calculate the sum in a single pass without needing to store all numbers?",
+    "Think about how the sum might overflow if you add numbers sequentially."
+   ],
+   "fallback_used": false,
+   "attempts": 1,
+   "guard_reasons": [],
+   "errors": [],
+   "calls": [
+    {
+     "latency_s": 8.86,
+     "prompt_tokens": 616,
+     "output_tokens": 85,
+     "tokens_per_s": 10.7
+    }
+   ],
+   "total_s": 8.9
+  }
+ ]
+}

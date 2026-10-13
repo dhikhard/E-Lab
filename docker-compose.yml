@@ -35,7 +35,7 @@ services:
     build: .
     container_name: elab-worker
     restart: unless-stopped
-    command: celery -A config worker -l info --concurrency 32 --pool=prefork --max-tasks-per-child 200 --max-memory-per-child 512000
+    command: celery -A config worker -Q celery -l info --concurrency 32 --pool=prefork --max-tasks-per-child 200 --max-memory-per-child 512000
     env_file: .env
     volumes:
       - .:/app
@@ -51,6 +51,30 @@ services:
         limits:
           cpus: "8"
           memory: 4G
+    networks:
+      - elab-network
+
+  # CPU-only LLM jobs (hint sets, question generation). One at a time: on a
+  # CPU, parallel generations just split the same cores and all get slower.
+  worker-llm:
+    build: .
+    container_name: elab-worker-llm
+    restart: unless-stopped
+    command: celery -A config worker -Q llm -l info --concurrency 1 --pool=prefork --max-tasks-per-child 50
+    env_file: .env
+    volumes:
+      - .:/app
+      - ./sandbox_data:/var/elab-sandbox
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - elab-db
+      - elab-redis
+      - ollama
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
     networks:
       - elab-network
 

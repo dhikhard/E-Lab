@@ -200,6 +200,12 @@ CELERY_BEAT_SCHEDULE = {
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", env("REDIS_URL", "redis://elab-redis:6379/1"))
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", "redis://elab-redis:6379/2")
 CELERY_TASK_ALWAYS_EAGER = env("CELERY_TASK_ALWAYS_EAGER", "false").lower() == "true"
+# CPU-only LLM work gets its own queue so a burst of hint/question generation
+# can never delay submission judging (see docker-compose worker-llm service).
+CELERY_TASK_ROUTES = {
+    "core.tasks.generate_hint_set_task": {"queue": "llm"},
+    "core.tasks.generate_llm_hint_task": {"queue": "llm"},
+}
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # ---------------------------------------------------------------------------
