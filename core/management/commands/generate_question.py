@@ -4,7 +4,7 @@ import json
 import logging
 
 from core.models import Module, Question, TestCase, User
-from core.rag_agent import RAGQuestionAgent
+from core.rag.generate import generate_one_canonical
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def _save_question_to_db(question, module, created_by=None):
         memory_limit_kb=int(question.get("memory_limit_kb", 128000)),
         allow_multiple_languages=bool(question.get("allow_multiple_languages", False)),
         is_mandatory=bool(question.get("is_mandatory", False)),
-        is_active=bool(question.get("is_active", True)),
+        is_active=False,  # generated questions are reviewed by faculty before going live
         created_by=created_by,
     )
 
@@ -49,7 +49,7 @@ def _save_question_to_db(question, module, created_by=None):
 
 
 class Command(BaseCommand):
-    help = 'Generate a question via problem adaptation (RAG agent) and add it to a module'
+    help = 'Generate a validated question with the RAG + LLM pipeline and add it to a module (inactive, for review)'
 
     def add_arguments(self, parser):
         parser.add_argument('--topic', type=str, required=True,
@@ -62,6 +62,7 @@ class Command(BaseCommand):
                             help='Module name to add the question to')
         parser.add_argument('--module-id', type=int, default=None,
                             help='Module ID to add the question to')
+        parser.add_argument('--language', type=str, default='python', choices=['c', 'cpp', 'python', 'java'])
         parser.add_argument('--faculty', type=str, default='',
                             help='Faculty username set as creator')
         parser.add_argument('--output', type=str, default=None,
@@ -115,20 +116,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('DRY RUN - will not save to database'))
 
         try:
-            agent = RAGQuestionAgent.get_instance()
-            question, references = agent.generate_question(topic, difficulty, options['prompt'])
+            question, references = generate_one_canonical(topic, difficulty, options['language'], options['prompt'])
         except Exception as e:
             logger.exception('Question generation failed')
             self.stdout.write(self.style.ERROR(f'Generation failed: {e}'))
             return
 
         self.stdout.write(self.style.SUCCESS(f'\n✅ Generated: "{question["title"]}"'))
-        self.stdout.write(f'Difficulty: {question["difficulty"]} | Level: {question.get("level")} | '
+        self.stdout.write(f'Difficulty: {question["difficulty"]} | '
                           f'Test cases: {len(question.get("test_cases", []))}')
         if references:
             self.stdout.write(f'\n📚 Based on {len(references)} reference questions:')
             for ref in references:
-                self.stdout.write(f'   - {ref.get("title", "Unknown")} ({ref.get("difficulty", "unknown")})')
+                self.stdout.write(f'   - {ref.get("title", "Unknown")} [{ref.get("ref")}]')
 
         output = json.dumps(question, indent=2)
         if options['output']:
@@ -144,7 +144,7 @@ class Command(BaseCommand):
                 saved, test_cases = _save_question_to_db(question, module, created_by=faculty)
                 self.stdout.write(self.style.SUCCESS(
                     f'\n✅ Saved to database! Question ID: {saved.pk}, '
-                    f'Slug: {saved.slug}, Test cases: {len(test_cases)}'
+                    f'Slug: {saved.slug}, Test cases: {len(test_cases)} (inactive until reviewed)'
                 ))
             except Exception as e:
                 logger.exception('Saving generated question failed')

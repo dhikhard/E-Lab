@@ -165,13 +165,20 @@ class AllowedHostsTests(TestCase):
 
 
 class AgentErrorLeakTests(TestCase):
-    """F24: internal exception text is not returned to the client."""
+    """F24: internal exception text is not returned to the client.
 
-    @patch("core.views.RAGQuestionAgent.get_instance", side_effect=RuntimeError("db password=hunter2"))
-    def test_generate_error_is_generic(self, _inst):
+    Generation is now an async job (T7), so the error surfaces through the job API.
+    """
+
+    @patch("core.rag.generate.generate_questions", side_effect=RuntimeError("db password=hunter2"))
+    def test_generate_error_is_generic(self, _gen):
+        from .models import GenerationJob
+        from .tasks import generate_questions_task
+
         fac = User.objects.create_user("fac", password="pw", role=User.Role.FACULTY)
         self.client.force_login(fac)
-        r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "array"}),
-                             content_type="application/json")
-        self.assertEqual(r.status_code, 500)
+        job = GenerationJob.objects.create(created_by=fac, params={"topic": "array"})
+        generate_questions_task.apply(args=[job.pk])
+        r = self.client.get(f"/api/faculty-agent/jobs/{job.pk}/")
+        self.assertEqual(r.json()["status"], "failed")
         self.assertNotIn("hunter2", r.content.decode())

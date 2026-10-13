@@ -8,7 +8,7 @@ Usage:
 
 import json
 from django.core.management.base import BaseCommand, CommandError
-from core.rag_agent import RAGQuestionAgent
+from core.rag.generate import generate_one_canonical
 from core.models import Module, Question, TestCase
 
 
@@ -43,6 +43,7 @@ class Command(BaseCommand):
             type=int,
             help="Module ID to add questions to",
         )
+        parser.add_argument("--language", default="python", choices=["c", "cpp", "python", "java"])
         parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -94,7 +95,6 @@ class Command(BaseCommand):
         else:
             raise CommandError("Must specify --module or --module-id")
 
-        agent = RAGQuestionAgent()
         generated_questions = []
 
         self.stdout.write(f"Generating {len(topics)} questions for module '{module.name}' (difficulty: {difficulty})")
@@ -103,7 +103,7 @@ class Command(BaseCommand):
             self.stdout.write(f"\n[{i}/{len(topics)}] Topic: {topic} ({difficulty})")
 
             try:
-                result, refs = agent.generate_question(topic, difficulty)
+                result, refs = generate_one_canonical(topic, difficulty, options.get("language") or "python")
 
                 # Save to database if not dry run
                 if not dry_run:
@@ -116,16 +116,7 @@ class Command(BaseCommand):
                         counter += 1
                         slug = f"{base_slug}-{counter}"
 
-                    # Determine language based on module category
-                    lang_id = 50  # C default
-                    if module.category == "python_programming":
-                        lang_id = 71
-                    elif module.category in ("placement_training", "advanced_placement_training"):
-                        lang_id = 71
-                    elif module.category in ("cpp_programming", "c_programming_advanced"):
-                        lang_id = 54
-                    elif module.category == "java_programming":
-                        lang_id = 62
+                    lang_id = result["language_id"]
 
                     question = Question.objects.create(
                         module=module,
@@ -134,13 +125,12 @@ class Command(BaseCommand):
                         description=result["description"],
                         starter_code=result.get("starter_code", ""),
                         difficulty=result["difficulty"],
-                        csv_level=result.get("level", 1),
-                        level_range=result.get("level_range", difficulty.capitalize()),
+                        level_range=difficulty.capitalize(),
                         time_limit=result.get("time_limit", 2),
                         memory_limit_kb=result.get("memory_limit_kb", 128000),
                         allow_multiple_languages=result.get("allow_multiple_languages", False),
                         is_mandatory=result.get("is_mandatory", False),
-                        is_active=result.get("is_active", True),
+                        is_active=False,  # reviewed by faculty before going live
                         language_id=lang_id,
                     )
 
@@ -150,7 +140,7 @@ class Command(BaseCommand):
                             question=question,
                             stdin=tc.get("input", ""),
                             expected_output=tc.get("expected_output", ""),
-                            is_sample=tc.get("is_sample", idx == 1),
+                            is_sample=tc.get("is_sample", idx <= 2),
                             order=idx,
                         )
 

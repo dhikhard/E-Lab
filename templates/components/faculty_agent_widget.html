@@ -46,6 +46,27 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
               <option value="easy">Easy</option>
               <option value="medium" selected>Medium</option>
               <option value="hard">Hard</option>
+              <option value="mixed">Mixed (easy → hard)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="agent-form-row">
+          <div class="agent-form-field">
+            <label for="agent-lang-select">Language</label>
+            <select id="agent-lang-select">
+              <option value="c">C</option>
+              <option value="cpp">C++</option>
+              <option value="python" selected>Python 3</option>
+              <option value="java">Java</option>
+            </select>
+          </div>
+          <div class="agent-form-field">
+            <label for="agent-count-select">How many</label>
+            <select id="agent-count-select">
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
             </select>
           </div>
         </div>
@@ -58,7 +79,16 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
 
         <div class="agent-form-field">
           <label for="agent-prompt-input">Specific Focus / Instructions (Optional)</label>
-          <textarea id="agent-prompt-input" rows="2" placeholder="e.g. Create a problem on 0/1 knapsack with C starter code and 10 test cases"></textarea>
+          <textarea id="agent-prompt-input" rows="2" placeholder="e.g. Focus on handling duplicate values"></textarea>
+        </div>
+
+        <div class="agent-form-field">
+          <label for="agent-source-select">Source material</label>
+          <select id="agent-source-select">
+            <option value="">Bundled DSA notes (default)</option>
+          </select>
+          <input type="file" id="agent-upload-input" accept=".md,.markdown,.txt,.pdf" aria-label="Upload study material (.md, .txt or .pdf, up to 5 MB)" />
+          <small id="agent-upload-status" class="agent-subtitle" role="status" aria-live="polite"></small>
         </div>
 
         <button type="submit" id="agent-generate-btn" class="agent-primary-btn">
@@ -82,9 +112,17 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
           <h4 id="res-title">Generated Question Title</h4>
         </div>
 
-        <div id="res-references-box" class="result-references">
-          <span>📚 References:</span> <span id="res-refs-list">3 RAG questions loaded</span>
+        <div class="result-references" id="res-nav" hidden>
+          <button type="button" class="agent-secondary-btn" id="res-prev" aria-label="Previous generated question">‹</button>
+          <span id="res-nav-label" aria-live="polite">Question 1 of 1</span>
+          <button type="button" class="agent-secondary-btn" id="res-next" aria-label="Next generated question">›</button>
         </div>
+
+        <div id="res-references-box" class="result-references">
+          <span>📚 Sources:</span> <span id="res-refs-list">—</span>
+        </div>
+        <div class="result-references" id="res-validation"></div>
+        <div class="result-references" id="res-rejected" hidden></div>
 
         <div class="result-tabs">
           <button class="result-tab active" data-tab="tab-desc">Problem Statement</button>
@@ -106,7 +144,7 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
 
         <div class="result-actions">
           <button id="agent-add-btn" class="agent-success-btn">
-            🚀 Add to E-Lab Question Bank
+            🚀 Save for review (inactive)
           </button>
           <button id="agent-retry-btn" class="agent-secondary-btn">
             🔄 Regenerate
@@ -202,6 +240,13 @@ document.addEventListener('DOMContentLoaded', () => {
           moduleSelect.selectedIndex = 1;
         }
 
+        (data.uploads || []).forEach(u => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = u.title + ' (uploaded)';
+          document.getElementById('agent-source-select').appendChild(opt);
+        });
+
         datalist.innerHTML = '';
         data.topics.forEach(t => {
           const opt = document.createElement('option');
@@ -214,82 +259,180 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Handle Question Generation
+  // ── Generation is an async job on the CPU LLM worker: queue, then poll ──
+  const langSelect = document.getElementById('agent-lang-select');
+  const countSelect = document.getElementById('agent-count-select');
+  const sourceSelect = document.getElementById('agent-source-select');
+  const uploadInput = document.getElementById('agent-upload-input');
+  const uploadStatus = document.getElementById('agent-upload-status');
+  const navBox = document.getElementById('res-nav');
+  const navLabel = document.getElementById('res-nav-label');
+  let currentJob = null;
+  let currentIndex = 0;
+  let pollTimer = null;
+
+  function stopLoading() {
+    loadingState.classList.add('hidden');
+    genBtn.disabled = false;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  }
+
+  function showError(message) {
+    stopLoading();
+    const rej = document.getElementById('res-rejected');
+    resultCard.classList.add('hidden');
+    successBanner.classList.remove('hidden');
+    document.getElementById('banner-msg').textContent = message;
+    document.getElementById('banner-view-link').parentElement.hidden = true;
+    rej.hidden = true;
+  }
+
+  uploadInput.addEventListener('change', async () => {
+    const file = uploadInput.files[0];
+    if (!file) return;
+    uploadStatus.textContent = 'Uploading and indexing ' + file.name + '…';
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('topic', topicInput.value.trim());
+    try {
+      const res = await fetch('/api/faculty-agent/upload/', {
+        method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') }, body: fd
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed');
+      const opt = document.createElement('option');
+      opt.value = data.document_id;
+      opt.textContent = data.title + ' (uploaded)';
+      sourceSelect.appendChild(opt);
+      sourceSelect.value = String(data.document_id);
+      uploadStatus.textContent = `Indexed ${data.chunks} sections from ${data.title}. Embedding runs in the background.`;
+    } catch (err) {
+      uploadStatus.textContent = err.message;
+    }
+    uploadInput.value = '';
+  });
+
   form.addEventListener('submit', async () => {
     const topic = topicInput.value.trim();
-    const difficulty = diffSelect.value;
-    const prompt = promptInput.value.trim();
-
-    if (!topic) return;
+    if (!topic && !sourceSelect.value) return;
 
     resultCard.classList.add('hidden');
     successBanner.classList.add('hidden');
+    document.getElementById('banner-view-link').parentElement.hidden = false;
     loadingState.classList.remove('hidden');
     genBtn.disabled = true;
-    statusMsg.textContent = "Retrieving reference questions from RAG dataset...";
-
-    setTimeout(() => {
-      if (!loadingState.classList.contains('hidden')) {
-        statusMsg.textContent = "Generating problem statement & 10 test cases using AI...";
-      }
-    }, 1200);
+    statusMsg.textContent = 'Queued — generation runs on the server CPU and can take a few minutes per question.';
 
     try {
-      const csrfToken = getCookie('csrftoken');
       const res = await fetch('/api/faculty-agent/generate/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken
-        },
-        body: JSON.stringify({ topic, difficulty, prompt })
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+        body: JSON.stringify({
+          topic, difficulty: diffSelect.value, prompt: promptInput.value.trim(),
+          language: langSelect.value, count: countSelect.value,
+          document_id: sourceSelect.value || null
+        })
       });
-
       const data = await res.json();
-      loadingState.classList.add('hidden');
-      genBtn.disabled = false;
-
-      if (data.success && data.question) {
-        currentGeneratedQuestion = data.question;
-        renderQuestionPreview(data.question, data.references);
-      } else {
-        alert('Generation failed: ' + (data.error || 'Unknown error'));
-      }
+      if (!data.job_id) throw new Error(data.error || 'Could not start generation.');
+      if (!res.ok && res.status !== 429) throw new Error(data.error || 'Could not start generation.');
+      pollJob(data.job_id);
     } catch (err) {
-      loadingState.classList.add('hidden');
-      genBtn.disabled = false;
-      alert('Error connecting to Faculty Agent service.');
+      showError(err.message || 'Error connecting to Faculty Agent service.');
     }
   });
 
-  function renderQuestionPreview(q, refs) {
+  async function pollJob(jobId) {
+    try {
+      const res = await fetch(`/api/faculty-agent/jobs/${jobId}/`);
+      const job = await res.json();
+      if (job.status === 'queued' || job.status === 'running') {
+        statusMsg.textContent = job.progress || 'Waiting for the generation worker…';
+        pollTimer = setTimeout(() => pollJob(jobId), 4000);
+        return;
+      }
+      stopLoading();
+      currentJob = job;
+      currentIndex = 0;
+      if (job.status === 'failed') {
+        showError(job.error || 'Generation failed.');
+        return;
+      }
+      renderJob();
+    } catch (err) {
+      pollTimer = setTimeout(() => pollJob(jobId), 6000);
+    }
+  }
+
+  function renderJob() {
+    const job = currentJob;
+    const rejBox = document.getElementById('res-rejected');
+    if (job.rejected && job.rejected.length) {
+      rejBox.hidden = false;
+      rejBox.textContent = `${job.rejected.length} candidate(s) rejected by validation: ` +
+        job.rejected.map(r => `${r.stage} — ${r.detail}`).join(' · ');
+    } else {
+      rejBox.hidden = true;
+    }
+    if (!job.questions.length) {
+      resultCard.classList.remove('hidden');
+      ['res-title'].forEach(id => document.getElementById(id).textContent = 'No question passed validation');
+      document.getElementById('res-desc-text').textContent = job.error || '';
+      document.getElementById('res-validation').textContent = '';
+      document.getElementById('res-refs-list').textContent = (job.sources || []).map(s => s.title).join(', ') || '—';
+      navBox.hidden = true;
+      addBtn.hidden = true;
+      return;
+    }
+    addBtn.hidden = false;
+    navBox.hidden = job.questions.length < 2;
+    renderQuestionPreview(job.questions[currentIndex], job.sources || []);
+  }
+
+  document.getElementById('res-prev').addEventListener('click', () => {
+    if (!currentJob) return;
+    currentIndex = (currentIndex - 1 + currentJob.questions.length) % currentJob.questions.length;
+    renderJob();
+  });
+  document.getElementById('res-next').addEventListener('click', () => {
+    if (!currentJob) return;
+    currentIndex = (currentIndex + 1) % currentJob.questions.length;
+    renderJob();
+  });
+
+  function renderQuestionPreview(q, sources) {
+    currentGeneratedQuestion = q;
+    navLabel.textContent = `Question ${currentIndex + 1} of ${currentJob.questions.length}`;
     document.getElementById('res-title').textContent = q.title || 'Untitled Problem';
     const badge = document.getElementById('res-diff-badge');
     badge.textContent = (q.difficulty || 'medium').toUpperCase();
     badge.className = 'result-badge ' + (q.difficulty || 'medium').toLowerCase();
 
-    const refsList = document.getElementById('res-refs-list');
-    if (refs && refs.length > 0) {
-      refsList.textContent = refs.map(r => r.title).join(', ');
-    } else {
-      refsList.textContent = 'Standard DSA Topic Context';
-    }
+    const cited = new Set(q.citations || []);
+    document.getElementById('res-refs-list').textContent =
+      sources.filter(s => cited.has(s.ref)).map(s => `${s.title} [${s.ref}]`).join(', ') || '—';
+
+    const v = q.validation || {};
+    const dc = v.difficulty_check || {};
+    document.getElementById('res-validation').textContent =
+      `✓ Reference solution passed all ${q.test_cases.length} tests in the sandbox · ✓ starter code compiles · ` +
+      `✓ citations verified · difficulty check: ${dc.consistent ? 'consistent' : 'please review'} ` +
+      `(estimate ${dc.estimate || '?'}) · generated in ${v.generation_s || '?'}s`;
 
     document.getElementById('res-desc-text').innerHTML = formatMarkdown(q.description || '');
-    document.getElementById('res-code-text').textContent = q.starter_code || q.solution || '';
+    document.getElementById('res-code-text').textContent =
+      '// Starter code\n' + (q.starter_code || '') + '\n\n// Reference solution (faculty only)\n' + (q.reference_solution || '');
 
     const testCases = q.test_cases || [];
     document.getElementById('res-case-count').textContent = testCases.length;
     const casesContainer = document.getElementById('res-cases-list');
     casesContainer.innerHTML = '';
-
     testCases.forEach((tc, idx) => {
       const caseDiv = document.createElement('div');
       caseDiv.className = 'test-case-item' + (tc.is_sample ? ' sample' : '');
       caseDiv.innerHTML = `
         <div class="tc-header">
           <span>Case #${idx + 1} (${tc.is_sample ? 'Sample' : 'Hidden'})</span>
-          <span class="tc-type">${tc.type || 'standard'}</span>
         </div>
         <div class="tc-detail"><strong>In:</strong> <code>${escapeHtml(tc.input || '')}</code></div>
         <div class="tc-detail"><strong>Out:</strong> <code>${escapeHtml(tc.expected_output || '')}</code></div>
@@ -297,13 +440,16 @@ document.addEventListener('DOMContentLoaded', () => {
       casesContainer.appendChild(caseDiv);
     });
 
+    addBtn.disabled = !!q.saved_question_id;
+    addBtn.textContent = q.saved_question_id ? '✓ Saved for review' : '🚀 Save for review (inactive)';
     resultCard.classList.remove('hidden');
-    resultCard.scrollIntoView({ behavior: 'smooth' });
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    resultCard.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
   }
 
-  // Handle Add to E-Lab Question Bank
+  // Save the selected validated question (server uses its own stored copy)
   addBtn.addEventListener('click', async () => {
-    if (!currentGeneratedQuestion) return;
+    if (!currentGeneratedQuestion || !currentJob) return;
     const moduleId = moduleSelect.value;
     if (!moduleId) {
       alert('Please select a target module first.');
@@ -311,44 +457,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     addBtn.disabled = true;
-    addBtn.textContent = 'Saving Question...';
+    addBtn.textContent = 'Saving…';
 
     try {
-      const csrfToken = getCookie('csrftoken');
-      const payload = {
-        module_id: moduleId,
-        title: currentGeneratedQuestion.title,
-        description: currentGeneratedQuestion.description,
-        difficulty: currentGeneratedQuestion.difficulty,
-        starter_code: currentGeneratedQuestion.starter_code || currentGeneratedQuestion.solution,
-        test_cases: currentGeneratedQuestion.test_cases
-      };
-
       const res = await fetch('/api/faculty-agent/add-question/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken
-        },
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+        body: JSON.stringify({ job_id: currentJob.job_id, index: currentGeneratedQuestion.index, module_id: moduleId })
       });
-
       const data = await res.json();
-      addBtn.disabled = false;
-      addBtn.textContent = '🚀 Add to E-Lab Question Bank';
-
       if (data.success) {
+        currentGeneratedQuestion.saved_question_id = data.question_id;
         document.getElementById('banner-msg').textContent = data.message;
         document.getElementById('banner-view-link').href = data.question_url;
         document.getElementById('banner-edit-link').href = data.edit_url;
         successBanner.classList.remove('hidden');
-        resultCard.classList.add('hidden');
+        addBtn.textContent = '✓ Saved for review';
       } else {
-        alert('Failed to add question: ' + (data.error || 'Unknown error'));
+        addBtn.disabled = false;
+        addBtn.textContent = '🚀 Save for review (inactive)';
+        alert('Failed to save question: ' + (data.error || 'Unknown error'));
       }
     } catch (err) {
       addBtn.disabled = false;
-      addBtn.textContent = '🚀 Add to E-Lab Question Bank';
+      addBtn.textContent = '🚀 Save for review (inactive)';
       alert('Network error while saving question.');
     }
   });
@@ -373,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   function formatMarkdown(text) {

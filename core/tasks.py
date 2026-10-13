@@ -78,3 +78,56 @@ def generate_llm_hint_task(question_id, tier=None):
     if question:
         return pregenerate_hints_for_question(question)
     return None
+
+
+@app.task(soft_time_limit=3600, time_limit=3660)
+def generate_questions_task(job_id):
+    """Run an LLM question-generation job (T7) on the CPU 'llm' queue."""
+    from django.utils import timezone
+
+    from .models import GenerationJob
+    from .rag import generate, retrieval
+
+    job = GenerationJob.objects.filter(pk=job_id).first()
+    if not job or job.status not in (GenerationJob.Status.QUEUED, GenerationJob.Status.RUNNING):
+        return None
+    job.status, job.started_at = GenerationJob.Status.RUNNING, timezone.now()
+    job.save(update_fields=["status", "started_at"])
+
+    def progress(msg):
+        GenerationJob.objects.filter(pk=job_id).update(progress=msg[:200])
+
+    p = job.params
+    try:
+        result = generate.generate_questions(
+            topic=p.get("topic", ""),
+            difficulty=p.get("difficulty", "mixed"),
+            language=p.get("language", "python"),
+            count=int(p.get("count", 1)),
+            custom_prompt=p.get("prompt", ""),
+            document_ids=p.get("document_ids") or None,
+            progress=progress,
+        )
+        job.result = result
+        job.status = GenerationJob.Status.DONE
+        if not result["accepted"]:
+            job.error = "No question passed validation; see the rejection reasons."
+    except retrieval.RetrievalError as exc:
+        job.status, job.error = GenerationJob.Status.FAILED, str(exc)
+    except Exception as exc:  # never leave a job stuck in 'running'
+        logger.exception("Question generation job %s failed", job_id)
+        job.status, job.error = GenerationJob.Status.FAILED, f"Generation failed ({type(exc).__name__})."
+    job.finished_at = timezone.now()
+    job.progress = ""
+    job.save(update_fields=["status", "result", "error", "finished_at", "progress"])
+    return job.status
+
+
+@app.task(soft_time_limit=900, time_limit=960)
+def embed_document_task(document_id):
+    from .models import RagDocument
+    from .rag import retrieval
+
+    doc = RagDocument.objects.filter(pk=document_id).first()
+    if doc:
+        retrieval.embed_pending(document=doc)

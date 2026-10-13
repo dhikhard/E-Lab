@@ -1,0 +1,22 @@
+[
+ {"q": "checking whether brackets in an expression are balanced", "topic": "stack"},
+ {"q": "find the next greater element for each item", "topic": "stack"},
+ {"q": "reverse a singly linked list in place", "topic": "linkedlist"},
+ {"q": "detect a cycle in a linked list", "topic": "linkedlist"},
+ {"q": "search for a value in a sorted rotated array in logarithmic time", "topic": "binary search"},
+ {"q": "find the square root of a number without library functions using halving", "topic": "binary search"},
+ {"q": "count frequency of words and find duplicates quickly", "topic": "hashmap hashing"},
+ {"q": "group words that are anagrams of each other", "topic": "hashmap hashing"},
+ {"q": "number of ways to climb stairs taking one or two steps", "topic": "dynamic programming"},
+ {"q": "minimum number of coins to make an amount", "topic": "dynamic programming"},
+ {"q": "generate all permutations or subsets of a set", "topic": "backtracking"},
+ {"q": "shortest path in an unweighted grid or graph level by level", "topic": "graph bfs dfs"},
+ {"q": "count islands of connected land cells in a grid", "topic": "graph bfs dfs"},
+ {"q": "k largest elements using a priority queue", "topic": "heap priorityqueue"},
+ {"q": "check whether a string reads the same forwards and backwards", "topic": "string"},
+ {"q": "rotate a square matrix by 90 degrees", "topic": "matrix"},
+ {"q": "count set bits in an integer", "topic": "bit manipulation"},
+ {"q": "level order traversal of a binary tree", "topic": "binary trees"},
+ {"q": "prefix search autocomplete over a dictionary of words", "topic": "trie"},
+ {"q": "greatest common divisor and prime numbers", "topic": "math number theory"}
+]

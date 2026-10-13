@@ -1,4 +1,6 @@
 import csv
+import datetime
+import hashlib
 import io
 import json
 import logging
@@ -41,6 +43,7 @@ from .forms import (
     TestCaseForm,
 )
 from .models import SubQuestion
+from .models import GenerationJob, RagDocument
 from .models import AssignedQuestion, Certificate, CertificateRequest, Course, LabSession, Module, ModuleQuestionAssignment, Notification, OpenEndedQuestion, PointsLedger, ProctoringEvent, Progress, Question, Quiz, QuizAttempt, QuizQuestion, Submission, TestCase, User
 from .sandbox import run_code as _local_run_code, language_for_id, inject_headers
 from .serializers import ProgressSerializer, QuestionSerializer, SubmissionSerializer
@@ -59,7 +62,10 @@ from .services import (
     student_progress,
     update_progress,
 )
-from .tasks import evaluate_submission_task
+from .tasks import embed_document_task, evaluate_submission_task, generate_questions_task
+from .rag.chunking import extract_pdf_text
+from .rag.generate import LANGUAGE_NAMES as RAG_LANGUAGE_NAMES
+from .rag.retrieval import RetrievalError, upsert_document as rag_upsert_document
 from .points import BASE_POINTS, award_points, leaderboard_rows, student_rank
 from .hint_service import can_unlock_now as can_unlock_hint_now, generation_status, get_student_hints_for_question, generate_hint_for_submission, resolve_language, unlock_hint_for_question
 
@@ -1128,12 +1134,6 @@ def attendance_report(request):
     return render(request, "faculty/attendance.html", {"sessions": sessions})
 
 
-def student_can_access_question(user, question):
-    """Faculty-like users see everything; students only questions assigned to them."""
-    if user.is_faculty_like:
-        return True
-    return AssignedQuestion.objects.filter(assignment__student=user, question=question).exists()
-
 def sandbox_run_code(language, source_code, stdin="", expected_output="", time_limit=2.0, memory_limit_kb=128000):
     """Run code in the sandbox, via a Celery worker unless SANDBOX_VIA_WORKER is off."""
     from django.conf import settings as dj_settings
@@ -1148,6 +1148,12 @@ def sandbox_run_code(language, source_code, stdin="", expected_output="", time_l
     )
     return result.get(timeout=time_limit + 30, propagate=True, disable_sync_subtasks=False)
 
+
+def student_can_access_question(user, question):
+    """Faculty-like users see everything; students only questions assigned to them."""
+    if user.is_faculty_like:
+        return True
+    return AssignedQuestion.objects.filter(assignment__student=user, question=question).exists()
 
 
 RUN_CODE_COOLDOWN_SECONDS = 3
@@ -1178,12 +1184,6 @@ def check_database():
 
 
 def check_sandbox():
-    try:
-        result = subprocess.run(
-            ["docker", "image", "inspect", "elab-sandbox"],
-            capture_output=True,
-            text=True,
-            timeout=3,
     from django.conf import settings as dj_settings
 
     if dj_settings.SANDBOX_VIA_WORKER:
@@ -1193,6 +1193,12 @@ def check_sandbox():
             return bool(celery_app.control.ping(timeout=1.0))
         except Exception:
             return False
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", "elab-sandbox"],
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         return result.returncode == 0
     except Exception:
@@ -3073,7 +3079,7 @@ def _parse_agent_request_data(request):
 
 @login_required
 def faculty_agent_topics_api(request):
-    """Return modules and RAG topics for faculty agent autocomplete."""
+    """Return modules, corpus topics and this faculty member's uploaded sources for the agent drawer."""
     if not request.user.is_faculty_like:
         return JsonResponse({"error": "Faculty access required"}, status=403)
 
@@ -3082,49 +3088,168 @@ def faculty_agent_topics_api(request):
         .select_related("course")
         .values("id", "name", "level", "course__name")
     )
-    
-    agent = RAGQuestionAgent.get_instance()
-    topics = agent.list_topics()
+    topics = sorted(
+        {t.title() for t in RagDocument.objects.filter(source=RagDocument.Source.CORPUS).values_list("topic", flat=True) if t}
+    ) or RAGQuestionAgent.get_instance().list_topics()
+    uploads = list(
+        RagDocument.objects.filter(source=RagDocument.Source.UPLOAD, uploaded_by=request.user)
+        .order_by("-created_at")
+        .values("id", "title", "topic")[:20]
+    )
 
     return JsonResponse({
         "modules": modules,
-        "topics": topics
+        "topics": topics,
+        "uploads": uploads,
+        "languages": [{"id": k, "name": v} for k, v in RAG_LANGUAGE_NAMES.items()],
     })
+
+
+GENERATION_JOBS_PER_DAY = 30
 
 
 @login_required
 @require_POST
 def faculty_agent_generate_api(request):
-    """Generate a new question via RAG agent based on faculty prompt."""
+    """Queue an LLM question-generation job grounded in the RAG index. Returns a job id to poll."""
     if not request.user.is_faculty_like:
         return JsonResponse({"error": "Faculty access required"}, status=403)
 
     data = _parse_agent_request_data(request)
-
-    topic = str(data.get("topic", "array")).strip()
-    difficulty = str(data.get("difficulty", "medium")).strip()
-    custom_prompt = str(data.get("prompt", "")).strip()
+    topic = str(data.get("topic", "")).strip()[:120]
+    difficulty = str(data.get("difficulty", "mixed")).strip().lower()
+    language = str(data.get("language", "python")).strip().lower()
+    custom_prompt = str(data.get("prompt", "")).strip()[:500]
+    try:
+        count = max(1, min(3, int(data.get("count", 1))))
+    except (TypeError, ValueError):
+        count = 1
+    document_ids = []
+    if data.get("document_id"):
+        doc = RagDocument.objects.filter(
+            pk=data.get("document_id"), source=RagDocument.Source.UPLOAD, uploaded_by=request.user
+        ).first()
+        if not doc:
+            return JsonResponse({"error": "Unknown study material"}, status=400)
+        document_ids = [doc.pk]
+        topic = topic or doc.topic or doc.title
 
     if not topic:
         return JsonResponse({"error": "Topic is required"}, status=400)
+    if difficulty not in ("easy", "medium", "hard", "mixed"):
+        return JsonResponse({"error": "Invalid difficulty"}, status=400)
+    if language not in RAG_LANGUAGE_NAMES:
+        return JsonResponse({"error": "Invalid language"}, status=400)
 
+    active = GenerationJob.objects.filter(
+        created_by=request.user, status__in=[GenerationJob.Status.QUEUED, GenerationJob.Status.RUNNING]
+    ).first()
+    if active:
+        return JsonResponse({"error": "You already have a generation running.", "job_id": active.pk}, status=429)
+    since = timezone.now() - datetime.timedelta(days=1)
+    if GenerationJob.objects.filter(created_by=request.user, created_at__gte=since).count() >= GENERATION_JOBS_PER_DAY:
+        return JsonResponse({"error": "Daily generation limit reached."}, status=429)
+
+    job = GenerationJob.objects.create(
+        created_by=request.user,
+        params={"topic": topic, "difficulty": difficulty, "language": language, "count": count,
+                "prompt": custom_prompt, "document_ids": document_ids},
+    )
+    generate_questions_task.delay(job.pk)
+    return JsonResponse({"success": True, "job_id": job.pk, "status": job.status}, status=202)
+
+
+def _job_question_payload(q, index, saved):
+    return {
+        "index": index,
+        "title": q["title"],
+        "difficulty": q["difficulty"],
+        "language": q["language"],
+        "description": _compose_generated_description(q),
+        "starter_code": q["starter_code"],
+        "reference_solution": q["reference_solution"],
+        "test_cases": [
+            {"input": t["input"], "expected_output": t["expected_output"], "is_sample": i < 2}
+            for i, t in enumerate(q["tests"])
+        ],
+        "citations": q["citations"],
+        "validation": q.get("validation", {}),
+        "saved_question_id": saved.get(str(index)),
+    }
+
+
+@login_required
+def faculty_agent_job_api(request, job_id):
+    if not request.user.is_faculty_like:
+        return JsonResponse({"error": "Faculty access required"}, status=403)
+    job = get_object_or_404(GenerationJob, pk=job_id)
+    if job.created_by_id != request.user.pk and not request.user.is_hod:
+        raise PermissionDenied
+    result = job.result or {}
+    saved = result.get("saved", {})
+    return JsonResponse({
+        "job_id": job.pk,
+        "status": job.status,
+        "progress": job.progress,
+        "error": job.error,
+        "questions": [_job_question_payload(q, i, saved) for i, q in enumerate(result.get("accepted", []))],
+        "rejected": [
+            {"stage": r.get("stage"), "detail": r.get("detail"), "target": r.get("target"), "attempt": r.get("attempt")}
+            for r in result.get("rejected", [])
+        ],
+        "sources": result.get("sources", []),
+        "model": result.get("model"),
+        "timings": result.get("timings"),
+    })
+
+
+def _compose_generated_description(q):
+    parts = [q["statement"].strip(), "Input Format:\n" + q["input_format"].strip(), "Output Format:\n" + q["output_format"].strip()]
+    if q.get("constraints"):
+        parts.append("Constraints:\n" + "\n".join(f"- {c}" for c in q["constraints"]))
+    return "\n\n".join(parts)
+
+
+ALLOWED_UPLOAD_EXTENSIONS = (".md", ".markdown", ".txt", ".pdf")
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+@login_required
+@require_POST
+def faculty_agent_upload_api(request):
+    """Upload study material (.md/.txt/.pdf) to generate questions from."""
+    if not request.user.is_faculty_like:
+        return JsonResponse({"error": "Faculty access required"}, status=403)
+    upload = request.FILES.get("file")
+    if not upload:
+        return JsonResponse({"error": "No file uploaded"}, status=400)
+    name = os.path.basename(upload.name or "material")[:200]
+    if not name.lower().endswith(ALLOWED_UPLOAD_EXTENSIONS):
+        return JsonResponse({"error": "Upload a .md, .txt or .pdf file"}, status=400)
+    if upload.size > MAX_UPLOAD_BYTES:
+        return JsonResponse({"error": "File is larger than 5 MB"}, status=400)
     try:
-        agent = RAGQuestionAgent.get_instance()
-        result, references = agent.generate_question(topic, difficulty, custom_prompt)
-        
-        ref_summary = [
-            {"title": r.get("title", ""), "topic": r.get("topic", ""), "difficulty": r.get("difficulty", "")}
-            for r in references
-        ]
-
-        return JsonResponse({
-            "success": True,
-            "question": result,
-            "references": ref_summary
-        })
+        if name.lower().endswith(".pdf"):
+            text = extract_pdf_text(upload)
+        else:
+            text = upload.read().decode("utf-8", errors="ignore")
     except Exception:
-        logger.exception("Faculty agent question generation failed")
-        return JsonResponse({"error": "Question generation failed. Please try again."}, status=500)
+        logger.exception("Could not read uploaded study material")
+        return JsonResponse({"error": "Could not read that file"}, status=400)
+    text = text.replace("\x00", "").strip()
+    if len(text) < 200:
+        return JsonResponse({"error": "The file has too little text to generate questions from (scanned PDFs are not supported)."}, status=400)
+    topic = str(request.POST.get("topic", "")).strip()[:120]
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    try:
+        doc, _ = rag_upsert_document(
+            RagDocument.Source.UPLOAD, f"{request.user.pk}/{digest[:16]}/{name}", name.rsplit(".", 1)[0][:255],
+            topic.lower(), text, uploaded_by=request.user,
+        )
+    except RetrievalError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    embed_document_task.delay(doc.pk)
+    return JsonResponse({"success": True, "document_id": doc.pk, "title": doc.title, "chunks": doc.chunks.count()})
 
 
 @login_required
@@ -3135,6 +3260,9 @@ def faculty_agent_add_question_api(request):
         return JsonResponse({"error": "Faculty access required"}, status=403)
 
     data = _parse_agent_request_data(request)
+
+    if data.get("job_id") is not None:
+        return _add_question_from_job(request, data)
 
     module_id = data.get("module_id")
     title = str(data.get("title", "")).strip()
@@ -3223,7 +3351,8 @@ def faculty_agent_add_question_api(request):
         language_id=lang_id,
         created_by=request.user,
         is_mandatory=False,
-        is_active=True
+        # Generated questions need faculty review before students see them.
+        is_active=False
     )
 
     # Add Test Cases
@@ -3249,10 +3378,59 @@ def faculty_agent_add_question_api(request):
 
     return JsonResponse({
         "success": True,
-        "message": f"Question '{question.title}' added successfully to {module.name}!",
+        "message": f"Question '{question.title}' saved to {module.name} as inactive. Review it and activate it when ready.",
         "question_id": question.pk,
         "question_url": url,
         "edit_url": edit_url,
+    })
+
+
+def _add_question_from_job(request, data):
+    """Save a validated generated question using the server-side job result (client data is not trusted)."""
+    job = get_object_or_404(GenerationJob, pk=data.get("job_id"), created_by=request.user, status=GenerationJob.Status.DONE)
+    try:
+        index = int(data.get("index", 0))
+        q = job.result["accepted"][index]
+        module = Module.objects.get(pk=int(data.get("module_id")))
+    except (KeyError, IndexError, TypeError, ValueError, Module.DoesNotExist):
+        return JsonResponse({"error": "Invalid job question or module"}, status=400)
+    saved = job.result.setdefault("saved", {})
+    if str(index) in saved:
+        return JsonResponse({"error": "This question was already saved.", "question_id": saved[str(index)]}, status=409)
+
+    base_slug = slugify(q["title"])[:150] or "question"
+    slug, counter = base_slug, 1
+    while Question.objects.filter(module=module, slug=slug).exists():
+        slug, counter = f"{base_slug}-{counter}", counter + 1
+    lang_ids = {"c": 50, "cpp": 54, "java": 62, "python": 71}
+    tests = q["tests"]
+    question = Question.objects.create(
+        module=module,
+        title=q["title"][:160],
+        slug=slug,
+        description=_compose_generated_description(q),
+        difficulty=q["difficulty"],
+        sample_input=tests[0]["input"],
+        sample_output=tests[0]["expected_output"],
+        starter_code=q["starter_code"],
+        language_id=lang_ids[q["language"]],
+        created_by=request.user,
+        is_mandatory=False,
+        is_active=False,  # pending faculty review
+    )
+    for i, t in enumerate(tests, 1):
+        TestCase.objects.create(question=question, stdin=t["input"], expected_output=t["expected_output"],
+                                is_sample=i <= 2, order=i)
+    saved[str(index)] = question.pk
+    job.save(update_fields=["result"])
+
+    from django.urls import reverse
+    return JsonResponse({
+        "success": True,
+        "message": f"'{question.title}' saved to {module.name} as inactive (pending review). Activate it from the question bank when ready.",
+        "question_id": question.pk,
+        "question_url": reverse("question_detail", args=[question.pk]),
+        "edit_url": reverse("faculty_question_edit", args=[question.pk]),
     })
 
 
@@ -3316,7 +3494,12 @@ def faculty_generate_question(request):
     - Save to module
     """
     faculty_required(request.user)
-    
+    # The standalone page's template never existed (this view raised
+    # TemplateDoesNotExist). Question generation lives in the AI Question
+    # Agent drawer, available on every faculty page.
+    messages.info(request, "Use the AI Question Agent button (bottom right) to generate questions.")
+    return redirect("faculty_question_bank")
+
     # Get modules the faculty manages
     modules = get_faculty_modules(request.user).filter(is_active=True).order_by("order")
     

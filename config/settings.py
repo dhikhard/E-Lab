@@ -209,6 +209,8 @@ SANDBOX_VIA_WORKER = env("SANDBOX_VIA_WORKER", "true").lower() == "true"
 CELERY_TASK_ROUTES = {
     "core.tasks.generate_hint_set_task": {"queue": "llm"},
     "core.tasks.generate_llm_hint_task": {"queue": "llm"},
+    "core.tasks.generate_questions_task": {"queue": "llm"},
+    "core.tasks.embed_document_task": {"queue": "llm"},
 }
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 

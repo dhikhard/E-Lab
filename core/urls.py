@@ -86,6 +86,8 @@ urlpatterns = [
     path("api/faculty-agent/topics/", views.faculty_agent_topics_api, name="faculty_agent_topics_api"),
     path("api/faculty-agent/generate/", views.faculty_agent_generate_api, name="faculty_agent_generate_api"),
     path("api/faculty-agent/add-question/", views.faculty_agent_add_question_api, name="faculty_agent_add_question_api"),
+    path("api/faculty-agent/jobs/<int:job_id>/", views.faculty_agent_job_api, name="faculty_agent_job_api"),
+    path("api/faculty-agent/upload/", views.faculty_agent_upload_api, name="faculty_agent_upload_api"),
     path("api/", include(router.urls)),
 ]
 

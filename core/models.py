@@ -820,3 +820,86 @@ class GeneratedHintSet(models.Model):
 
     def __str__(self):
         return f"Hints for {self.question_id} ({self.language})"
+
+
+class RagDocument(models.Model):
+    """A source document for question generation: the bundled DSA corpus or faculty-uploaded study material."""
+
+    class Source(models.TextChoices):
+        CORPUS = "corpus", "Bundled DSA corpus"
+        UPLOAD = "upload", "Faculty upload"
+
+    source = models.CharField(max_length=16, choices=Source.choices)
+    title = models.CharField(max_length=255)
+    topic = models.CharField(max_length=120, blank=True)
+    path = models.CharField(max_length=500, blank=True, help_text="Corpus-relative path or original upload filename")
+    content_hash = models.CharField(max_length=64)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["source", "path"], name="uniq_rag_document_path")]
+
+    def __str__(self):
+        return f"{self.title} ({self.source})"
+
+
+class RagChunk(models.Model):
+    """Structure-aware chunk of a RagDocument with its embedding (tagged with model + dimension)."""
+
+    document = models.ForeignKey(RagDocument, on_delete=models.CASCADE, related_name="chunks")
+    index = models.PositiveIntegerField()
+    heading = models.CharField(max_length=300, blank=True)
+    text = models.TextField()
+    content_hash = models.CharField(max_length=64)
+    embedding = models.JSONField(null=True, blank=True)
+    embed_model = models.CharField(max_length=80, blank=True)
+    embed_dim = models.PositiveIntegerField(default=0)
+    embed_version = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["document_id", "index"]
+        constraints = [models.UniqueConstraint(fields=["document", "index"], name="uniq_rag_chunk_index")]
+        indexes = [models.Index(fields=["embed_model", "embed_version"])]
+
+    @property
+    def ref(self):
+        return f"D{self.document_id}C{self.index}"
+
+    def __str__(self):
+        return self.ref
+
+
+class QuestionEmbedding(models.Model):
+    """Cached embedding of an existing question, for semantic de-duplication of generated questions."""
+
+    question = models.OneToOneField(Question, on_delete=models.CASCADE, related_name="embedding")
+    text_hash = models.CharField(max_length=64)
+    embed_model = models.CharField(max_length=80)
+    vector = models.JSONField()
+
+
+class GenerationJob(models.Model):
+    """Asynchronous LLM question-generation request (runs on the CPU 'llm' Celery queue)."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        DONE = "done", "Done"
+        FAILED = "failed", "Failed"
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="generation_jobs")
+    params = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    progress = models.CharField(max_length=200, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Job {self.pk} ({self.status})"
