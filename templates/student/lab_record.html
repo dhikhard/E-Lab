@@ -2,14 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Lab Record - {{ user.display_name }}</title>
+  <title>{{ record_title }} - {{ user.display_name }}</title>
   <style>
     :root {
       --bg: #ffffff;
       --text: #000000;
       --border: #ccc;
     }
-    @page { margin: 2cm; }
+    /* Running footer on every printed page (T1). @page margin boxes live in
+       the page margin, so they repeat on every page and can never overlap the
+       body content. Supported by Chromium 131+ (Chrome/Edge). */
+    @page {
+      margin: 2cm 2cm 2.4cm 2cm;
+      @bottom-left {
+        content: "NMAM Institute of Technology";
+        font: 9pt 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+      }
+      @bottom-center {
+        content: counter(page);
+        font: 9pt 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+      }
+      @bottom-right {
+        content: "Department of Computer and Communication";
+        font: 9pt 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+      }
+    }
+    /* Fallback for browsers without margin boxes (e.g. older Firefox): a
+       fixed footer, which browsers repeat on each printed page. Only enabled
+       by the script below when CSSMarginRule is unavailable. */
+    .print-footer { display: none; }
+    @media print {
+      .no-margin-boxes .print-footer {
+        display: flex;
+        justify-content: space-between;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        font-size: 9pt;
+        border-top: 1px solid var(--border);
+        padding-top: 4px;
+        background: var(--bg);
+      }
+      .no-margin-boxes body { padding-bottom: 1.2cm; }
+    }
     body {
       font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       color: var(--text);
@@ -42,12 +81,15 @@
       margin-bottom: 20px;
     }
     
-    .question-block {
-      margin-bottom: 30px;
-      page-break-inside: avoid;
-    }
-    .question-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
-    .question-desc { font-size: 13px; margin-bottom: 15px; color: #333; }
+    /* Long questions/code may span pages; forbidding breaks left near-empty
+       pages before any block taller than the remaining space. Keep headings
+       and labels attached to what follows instead. */
+    .question-block { margin-bottom: 30px; }
+    .question-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; break-after: avoid; }
+    .question-block strong { break-after: avoid; }
+    .sample-row { break-inside: avoid; }
+    .question-desc { font-size: 13px; margin-bottom: 15px; color: #333; overflow-wrap: anywhere; }
+    .question-desc img { max-width: 100%; height: auto; }
     
     .code-block {
       background: #f8f9fa;
@@ -57,7 +99,9 @@
       font-family: 'Courier New', Courier, monospace;
       font-size: 12px;
       white-space: pre-wrap;
-      page-break-inside: avoid;
+      overflow-wrap: anywhere;
+      orphans: 3;
+      widows: 3;
       margin-bottom: 15px;
     }
     
@@ -94,6 +138,13 @@
   </style>
 </head>
 <body>
+  <script>
+    if (typeof CSSMarginRule === "undefined") document.documentElement.classList.add("no-margin-boxes");
+  </script>
+  <div class="print-footer" aria-hidden="true">
+    <span>NMAM Institute of Technology</span>
+    <span>Department of Computer and Communication</span>
+  </div>
 
   <div class="no-print" style="text-align: center; margin: 20px 0;">
     <button class="btn-print" onclick="window.print()">🖨️ Print to PDF</button>
@@ -102,7 +153,7 @@
   </div>
 
   <div class="header">
-    <h1>C Programming Laboratory Record</h1>
+    <h1>{{ record_title }}</h1>
     <h2>Department of CCE</h2>
     <div class="student-info">
       <div>
@@ -118,17 +169,17 @@
 
   {% for m_data in module_data %}
     <div class="module-section" style="{% if not forloop.first %}page-break-before: always;{% endif %}">
-      <h3 class="module-title">Module {{ m_data.module.order }}: {{ m_data.module.name }}</h3>
+      <h3 class="module-title">{% if show_course and m_data.module.course %}{{ m_data.module.course.name }} · {% endif %}Module {{ m_data.module.order }}: {{ m_data.module.name }}</h3>
       
       {% for q_data in m_data.questions %}
         <div class="question-block">
           <div class="question-title">{{ forloop.counter }}. {{ q_data.question.title }}</div>
           <div class="question-desc">{{ q_data.question.description|safe }}</div>
           
-          {% with sample_cases=q_data.question.test_cases.all %}
+          {% with sample_cases=q_data.question.sample_cases %}
             {% for tc in sample_cases %}
               {% if tc.is_sample %}
-              <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+              <div class="sample-row" style="display: flex; gap: 20px; margin-bottom: 20px;">
                 <div style="flex: 1;">
                   <strong>Sample Input:</strong>
                   <div class="code-block" style="margin-top: 5px;">{{ tc.stdin }}</div>

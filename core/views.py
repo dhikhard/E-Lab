@@ -15,7 +15,7 @@ from django.contrib.auth.views import LoginView, LogoutView
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -2675,8 +2675,23 @@ def student_lab_record(request):
             Q(course__available_from_semester__lte=current_semester)
             | Q(course__isnull=True)
         )
+        .select_related("course")
         .order_by("order")
-        .prefetch_related("questions")
+        .prefetch_related(
+            Prefetch(
+                "questions",
+                queryset=Question.objects.filter(is_active=True)
+                .order_by("id")
+                .prefetch_related(
+                    Prefetch(
+                        "test_cases",
+                        queryset=TestCase.objects.filter(is_sample=True).order_by("order"),
+                        to_attr="sample_cases",
+                    )
+                ),
+                to_attr="active_questions",
+            )
+        )
     )
     
     all_subs = (
@@ -2685,7 +2700,7 @@ def student_lab_record(request):
         .select_related("question")
     )
     
-    # Get the latest accepted submission per question
+    # Get the latest accepted submission per question (rows are newest-first).
     latest_subs = {}
     for sub in all_subs:
         latest_subs.setdefault(sub.question_id, sub)
@@ -2693,7 +2708,7 @@ def student_lab_record(request):
     module_data = []
     for module in modules:
         qs = []
-        for q in module.questions.filter(is_active=True).order_by("id"):
+        for q in module.active_questions:
             if q.id in latest_subs:
                 qs.append({
                     "question": q,
@@ -2704,8 +2719,21 @@ def student_lab_record(request):
                 "module": module,
                 "questions": qs
             })
+
+    course_names = []
+    for m_data in module_data:
+        name = m_data["module"].course.name if m_data["module"].course else None
+        if name and name not in course_names:
+            course_names.append(name)
+    record_title = (
+        f"{course_names[0]} Laboratory Record" if len(course_names) == 1 else "Programming Laboratory Record"
+    )
             
-    return render(request, "student/lab_record.html", {"module_data": module_data})
+    return render(
+        request,
+        "student/lab_record.html",
+        {"module_data": module_data, "record_title": record_title, "show_course": len(course_names) > 1},
+    )
 
 
 @login_required
