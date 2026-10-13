@@ -6327,3 +6327,21 @@ body.is-maximized-page .editor-header-bar { flex-wrap: wrap; row-gap: 8px; }
   body.is-maximized-split .submit-panel-wide { height: 85vh !important; }
   body.is-maximized-page .monaco-editor { min-height: 280px !important; }
 }
+
+/* ── Accessibility & motion (T6) — colour-neutral: uses currentColor only ── */
+/* Visible keyboard focus for buttons/links/summary elements that had none.
+   :where() keeps specificity low so existing input focus styles still win. */
+:where(a, button, [role="button"], summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Honour the OS "reduce motion" setting: keep state changes, drop animation. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
