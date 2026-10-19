@@ -171,7 +171,8 @@ def build_messages(question, language, student_code=None):
         "3. Never name a data structure or technique: no stack, queue, hash map, dictionary, set, sliding window, two pointers, "
         "dynamic programming, memoisation, recurrence, binary search, DFS, BFS, greedy, heap, sorting the input, prefix sums. "
         "Describe the property the student should notice instead (for example 'what do you need to remember about the "
-        "elements you have already seen?').\n"
+        "elements you have already seen?'). Exception: if the problem statement itself names the data structure or "
+        "technique (for example 'implement a stack'), you may name it too, but never explain how to implement it.\n"
         "4. Never name the specific library function or method that solves the task directly.\n"
         f"5. Speak only in terms of {lang['name']}. Where useful, refer to {lang['idioms']}. "
         f"Never mention constructs from {', '.join(lang['foreign'])}.\n"
@@ -213,6 +214,14 @@ def _sentences(text):
     return [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
 
 
+def _level(item):
+    """The hint's level as an int (models sometimes emit "2"), or None."""
+    try:
+        return int(item.get("level"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def parse_hints(raw):
     """Parse + schema-validate model output. Returns three cleaned strings."""
     try:
@@ -223,8 +232,8 @@ def parse_hints(raw):
     if not isinstance(hints, list) or len(hints) != 3:
         raise HintValidationError("expected exactly 3 hints")
     texts = []
-    for expected_level, item in enumerate(sorted(hints, key=lambda h: h.get("level", 0) if isinstance(h, dict) else 0), 1):
-        if not isinstance(item, dict) or item.get("level") != expected_level or not isinstance(item.get("text"), str):
+    for expected_level, item in enumerate(sorted(hints, key=lambda h: _level(h) or 0), 1):
+        if _level(item) != expected_level or not isinstance(item.get("text"), str):
             raise HintValidationError("hints must have levels 1, 2, 3 and string text")
         text = re.sub(r"\s+", " ", item["text"]).strip()
         parts = _sentences(text)
@@ -253,15 +262,19 @@ def leak_reasons(texts, question, language):
     reasons = []
     lang = LANGUAGES[language_key(language)]
     secret = _secret_outputs(question)
+    # Terms the problem itself uses are not a leak: a "stack operations" or
+    # "binary search tree" lab program can't be hinted without naming it.
+    problem = f"{_plain(question.title, 500)} {_plain(question.description, 5000)}"
+    named_by_problem = {p for p in TECHNIQUE_TERMS + lang["forbidden"] if re.search(p, problem, flags=re.IGNORECASE)}
     for level, text in enumerate(texts, 1):
         for pattern, label in LEAK_PATTERNS:
             if re.search(pattern, text, flags=re.IGNORECASE if label in ("gives answer", "step-by-step") else 0):
                 reasons.append(f"hint {level}: {label}")
         for pattern in TECHNIQUE_TERMS:
-            if re.search(pattern, text, flags=re.IGNORECASE):
+            if pattern not in named_by_problem and re.search(pattern, text, flags=re.IGNORECASE):
                 reasons.append(f"hint {level}: names a technique /{pattern}/")
         for pattern in lang["forbidden"]:
-            if re.search(pattern, text, flags=re.IGNORECASE):
+            if pattern not in named_by_problem and re.search(pattern, text, flags=re.IGNORECASE):
                 reasons.append(f"hint {level}: wrong-language construct /{pattern}/")
         for out in secret:
             if out in text:
@@ -280,7 +293,7 @@ def _call_model(messages):
         "options": {
             "temperature": 0.3,
             "num_ctx": 2048,
-            "num_predict": 320,
+            "num_predict": 512,  # three 1-2 sentence hints + JSON; 320 truncated long answers into invalid JSON
             "num_thread": int(os.environ.get("OLLAMA_NUM_THREAD", "4")),
         },
     }

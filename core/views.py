@@ -67,7 +67,7 @@ from .rag.chunking import extract_pdf_text
 from .rag.generate import LANGUAGE_NAMES as RAG_LANGUAGE_NAMES
 from .rag.retrieval import RetrievalError, upsert_document as rag_upsert_document
 from .points import BASE_POINTS, award_points, leaderboard_rows, student_rank
-from .hint_service import can_unlock_now as can_unlock_hint_now, generation_status, get_student_hints_for_question, generate_hint_for_submission, resolve_language, unlock_hint_for_question
+from .hint_service import can_unlock_now as can_unlock_hint_now, generation_status, get_student_hints_for_question, generate_hint_for_submission, resolve_language, student_code_digest, unlock_hint_for_question
 
 logger = logging.getLogger(__name__)
 
@@ -980,7 +980,7 @@ def hint_status_api(request, question_id):
         ],
     }
 
-    status = generation_status(question, language)
+    status = generation_status(question, language, student_code_digest(request.user, question))
     result["hint_generation_status"] = status
     result["llm_hint_available"] = status == "complete"
 
@@ -2727,14 +2727,18 @@ def student_lab_record(request):
         latest_subs.setdefault(sub.question_id, sub)
         
     module_data = []
+    index_rows = []
     for module in modules:
         qs = []
         for q in module.active_questions:
             if q.id in latest_subs:
-                qs.append({
+                row = {
+                    "number": len(index_rows) + 1,
                     "question": q,
-                    "submission": latest_subs[q.id]
-                })
+                    "submission": latest_subs[q.id],
+                }
+                qs.append(row)
+                index_rows.append(row)
         if qs:
             module_data.append({
                 "module": module,
@@ -2753,8 +2757,33 @@ def student_lab_record(request):
     return render(
         request,
         "student/lab_record.html",
-        {"module_data": module_data, "record_title": record_title, "show_course": len(course_names) > 1},
+        {
+            "module_data": module_data,
+            "index_rows": index_rows,
+            "record_title": record_title,
+            "show_course": len(course_names) > 1,
+            "watermark_url": _usn_watermark_url(request.user.usn or request.user.username),
+        },
     )
+
+
+def _usn_watermark_url(text):
+    """Data URI of an A4-sized SVG with ``text`` drawn faintly along the diagonal.
+
+    Used as the @page background of the lab record so every printed content
+    page carries the student's USN behind the text without hiding it.
+    """
+    from urllib.parse import quote
+    from xml.sax.saxutils import escape
+
+    font_size = min(32, 260 / (0.6 * max(len(text), 1)))  # keep long USNs on the page
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 210 297'>"
+        f"<text x='105' y='148.5' font-family='Helvetica, Arial, sans-serif' font-size='{font_size:.1f}' "
+        "font-weight='700' fill='#000' fill-opacity='0.07' text-anchor='middle' dominant-baseline='middle' "
+        f"transform='rotate(-55 105 148.5)'>{escape(text)}</text></svg>"
+    )
+    return "data:image/svg+xml," + quote(svg, safe="")
 
 
 @login_required

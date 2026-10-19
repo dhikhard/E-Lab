@@ -1,4 +1,4 @@
-{% load custom_filters %}
+{% load custom_filters static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,7 +14,11 @@
        the page margin, so they repeat on every page and can never overlap the
        body content. Supported by Chromium 131+ (Chrome/Edge). */
     @page {
+      size: A4;
       margin: 2cm 2cm 2.4cm 2cm;
+      /* USN watermark behind every content page. Sized in absolute units:
+         Chromium mis-positions percentage-sized @page backgrounds. */
+      background: url("{{ watermark_url }}") 0 0 / 210mm 297mm no-repeat;
       @bottom-left {
         content: "NMAM Institute of Technology";
         font: 9pt 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -31,6 +35,44 @@
         color: var(--text);
       }
     }
+    /* Page 1: the department cover (BLOCK.svg), full bleed, no footer. */
+    @page cover {
+      margin: 0;
+      background: none;
+      @bottom-left { content: none; }
+      @bottom-center { content: none; }
+      @bottom-right { content: none; }
+    }
+    /* Page 2: the index, without the watermark. */
+    @page index { background: none; }
+    /* Positioned after the fixed fallback footer, so the opaque cover image
+       paints over it where margin boxes are unsupported. */
+    .cover { page: cover; break-after: page; text-align: center; position: relative; z-index: 1; }
+    .cover img { display: block; width: 100%; max-width: 210mm; margin: 0 auto; }
+    @media print {
+      .cover img { width: 210mm; height: 297mm; max-width: none; }
+    }
+    .index-page { page: index; break-after: page; }
+    .index-page h2 {
+      text-align: center;
+      font-size: 22px;
+      letter-spacing: 2px;
+      margin: 0 0 16px 0;
+    }
+    .index-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .index-table th, .index-table td {
+      border: 1px solid var(--text);
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+    .index-table th { font-weight: 600; }
+    .index-table tr { break-inside: avoid; }
+    .index-table .num, .index-table .page-no, .index-table .date { text-align: center; white-space: nowrap; }
+    .index-table .num { width: 8%; }
+    .index-table .page-no { width: 10%; }
+    .index-table .date { width: 14%; }
+    .index-table .marks { width: 12%; }
+
     /* Fallback for browsers without margin boxes (e.g. older Firefox): a
        fixed footer, which browsers repeat on each printed page. Only enabled
        by the script below when CSSMarginRule is unavailable. */
@@ -53,11 +95,13 @@
     body {
       font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       color: var(--text);
-      background: var(--bg);
       line-height: 1.5;
       margin: 0;
       padding: 0;
     }
+    /* Screen only: in print a body background propagates to the page canvas
+       and would paint over the @page watermark. */
+    @media screen { body { background: var(--bg); } }
     .header {
       text-align: center;
       border-bottom: 2px solid var(--text);
@@ -93,7 +137,7 @@
     .question-desc img { max-width: 100%; height: auto; }
     
     .code-block {
-      background: #f8f9fa;
+      background: rgba(0, 0, 0, 0.03);
       border: 1px solid var(--border);
       padding: 15px;
       border-radius: 4px;
@@ -153,6 +197,38 @@
     <a href="{% url 'dashboard' %}" style="color: #666; text-decoration: none; font-size: 14px;">← Back to Dashboard</a>
   </div>
 
+  <div class="cover">
+    <img src="{% static 'img/BLOCK.svg' %}" alt="{{ record_title }} cover">
+  </div>
+
+  <section class="index-page">
+    <h2>INDEX</h2>
+    <table class="index-table">
+      <thead>
+        <tr>
+          <th class="num">Expt. No.</th>
+          <th>Name of the Experiments</th>
+          <th class="page-no">Page No.</th>
+          <th class="date">Date</th>
+          <th class="marks">Marks</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in index_rows %}
+        <tr>
+          <td class="num">{{ row.number }}.</td>
+          <td>{{ row.question.title }}</td>
+          <td class="page-no"></td>
+          <td class="date">{{ row.submission.submitted_at|date:"d/m/Y" }}</td>
+          <td class="marks"></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" style="text-align: center;">No programs completed yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
   <div class="header">
     <h1>{{ record_title }}</h1>
     <h2>Department of CCE</h2>
@@ -174,7 +250,7 @@
       
       {% for q_data in m_data.questions %}
         <div class="question-block">
-          <div class="question-title">{{ forloop.counter }}. {{ q_data.question.title }}</div>
+          <div class="question-title">{{ q_data.number }}. {{ q_data.question.title }}</div>
           <div class="question-desc">{{ q_data.question.description|safe_html }}</div>
           
           {% with sample_cases=q_data.question.sample_cases %}

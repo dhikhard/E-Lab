@@ -1,4 +1,5 @@
 """T1: printable lab record — course title, running footer, no N+1 queries, PDF evidence."""
+import datetime
 import io
 import os
 import unittest
@@ -8,6 +9,7 @@ from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
+from .views import _usn_watermark_url
 from .models import Course, Module, Question, Submission, TestCase as QTestCase, User
 
 try:
@@ -62,6 +64,39 @@ class LabRecordViewTests(TestCase):
         self.assertContains(r, FOOTER_RIGHT)
         self.assertNotContains(r, "Commnunication")
 
+    def test_cover_page_uses_block_svg(self):
+        make_record(self.student)
+        r = self.client.get("/lab-record/")
+        self.assertContains(r, "img/BLOCK.svg")
+
+    def test_index_lists_completed_programs_with_submission_date(self):
+        make_record(self.student, "Python Programming", modules=2, questions=2)
+        sub = Submission.objects.filter(student=self.student).order_by("id").first()
+        Submission.objects.filter(pk=sub.pk).update(submitted_at=datetime.datetime(2025, 8, 26, 10, tzinfo=datetime.timezone.utc))
+        # An unsolved question must not be listed.
+        Question.objects.create(module=sub.question.module, title="Unsolved", slug="unsolved", description="d")
+        r = self.client.get("/lab-record/")
+        rows = r.context["index_rows"]
+        self.assertEqual([row["number"] for row in rows], [1, 2, 3, 4])
+        self.assertEqual(rows[0]["question"], sub.question)
+        self.assertContains(r, "26/08/2025")
+        self.assertNotContains(r, "Unsolved")
+
+    def test_watermark_is_the_students_usn(self):
+        self.student.usn = "4NM22CC001"
+        self.student.save()
+        make_record(self.student)
+        r = self.client.get("/lab-record/")
+        self.assertIn("4NM22CC001", r.context["watermark_url"])
+        self.assertTrue(r.context["watermark_url"].startswith("data:image/svg+xml,"))
+
+    def test_watermark_escapes_markup(self):
+        url = _usn_watermark_url("<a'\")")
+        self.assertNotIn("<a", url)
+        self.assertNotIn('"', url)
+        self.assertNotIn("'", url)
+        self.assertNotIn(")", url)
+
     def test_query_count_does_not_grow_with_questions(self):
         make_record(self.student, "Small", modules=1, questions=1)
         with CaptureQueriesContext(connection) as small:
@@ -112,7 +147,8 @@ class LabRecordPdfTests(StaticLiveServerTestCase):
         return [p.extract_text() for p in reader.pages], screen_footer_visible
 
     def _assert_footer_on_every_page(self, pages):
-        for number, text in enumerate(pages, start=1):
+        self.assertNotIn(FOOTER_LEFT, pages[0], "cover page has no footer")
+        for number, text in enumerate(pages[1:], start=2):
             with self.subTest(page=number):
                 self.assertIn(FOOTER_LEFT, text)
                 self.assertIn(FOOTER_RIGHT, text)
@@ -121,7 +157,8 @@ class LabRecordPdfTests(StaticLiveServerTestCase):
     def test_one_page_report(self):
         make_record(self.student)
         pages, screen_visible = self._pdf("one_page")
-        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages), 3)  # cover, index, content
+        self.assertIn("INDEX", pages[1])
         self._assert_footer_on_every_page(pages)
         self.assertFalse(screen_visible, "footer must not appear on screen")
 

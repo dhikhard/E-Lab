@@ -100,6 +100,22 @@ class ParseAndGuardTests(_QuestionMixin, TestCase):
         fine = "What do you need to remember about the elements you have already seen?"
         self.assertEqual(llm_hints.leak_reasons([fine], self.q, "python"), [])
 
+    def test_terms_named_by_the_problem_are_allowed(self):
+        stack_q = self.make_question(
+            title="Stack operations", slug="stack-ops", language_id=50,
+            description="Write a menu-driven program to perform stack operations such as push, pop and display using arrays.",
+        )
+        ok = "What should your stack do when you pop and nothing has been pushed yet?"
+        self.assertEqual(llm_hints.leak_reasons([ok], stack_q, "c"), [])
+        other = "Use a queue to remember the order of the elements."
+        self.assertTrue(any("names a technique" in r for r in llm_hints.leak_reasons([other], stack_q, "c")))
+
+    def test_string_levels_accepted(self):
+        mixed = [dict(GOOD[0], level="1"), dict(GOOD[1], level=2), dict(GOOD[2], level="3")]
+        self.assertEqual(len(llm_hints.parse_hints(as_json(mixed))), 3)
+        with self.assertRaises(llm_hints.HintValidationError):
+            llm_hints.parse_hints(as_json([dict(GOOD[0], level="one")] + GOOD[1:]))
+
     def test_guard_catches_hidden_expected_output(self):
         reasons = llm_hints.leak_reasons(["You should print NOT-A-PALINDROME-42 here."], self.q, "python")
         self.assertTrue(any("hidden expected output" in r for r in reasons))
@@ -179,6 +195,26 @@ class GenerationTests(_QuestionMixin, TestCase):
         self.assertNotIn("secret_student_variable", logs.output[0])
 
 
+class TopicDetectionTests(TestCase):
+    def topic(self, title, description):
+        from types import SimpleNamespace
+
+        from .hint_service import _detect_question_topic
+
+        return _detect_question_topic(SimpleNamespace(title=title, description=description, module=None))
+
+    def test_specific_data_structure_wins(self):
+        self.assertEqual(
+            self.topic("Stack using arrays", "Perform push, pop and display on a stack of characters in an array."),
+            "stack_queue",
+        )
+        self.assertEqual(self.topic("Infix to postfix", "Convert an infix expression string to postfix."), "stack_queue")
+
+    def test_keywords_match_whole_words(self):
+        self.assertEqual(self.topic("Screen size", "Print the dpi of a screen."), "general_array_loop")
+        self.assertEqual(self.topic("Fibonacci", "Print the first n terms."), "dp")
+
+
 class UnlockFlowTests(_QuestionMixin, TestCase):
     def setUp(self):
         cache.clear()
@@ -206,6 +242,22 @@ class UnlockFlowTests(_QuestionMixin, TestCase):
         h = unlock_hint_for_question(self.b, self.q, "python")
         self.assertEqual(h.hint_type, "local_llm")
         self.assertEqual(llm_hints.stats()["cache_hit"], 1)
+
+    def test_code_specific_set_only_upgrades_that_students_rows(self):
+        unlock_hint_for_question(self.a, self.q, "python")
+        unlock_hint_for_question(self.b, self.q, "python")
+        store_hint_set(self.q, "python", "abc123", [h["text"] for h in GOOD], student_id=self.a.id)
+        types = dict(StudentQuestionHint.objects.filter(question=self.q).values_list("student__username", "hint_type"))
+        self.assertEqual(types, {"a": "local_llm", "b": "diagnostic"})
+
+    def test_duplicate_task_does_not_call_the_model(self):
+        from .tasks import generate_hint_set_task
+
+        store_hint_set(self.q, "python", "-", [h["text"] for h in GOOD])
+        with patch("core.llm_hints._call_model") as call:
+            result = generate_hint_set_task.apply(args=[self.q.id, "python"])
+        call.assert_not_called()
+        self.assertEqual(result.result[0], GOOD[0]["text"])
 
     def test_language_specific_sets_do_not_mix(self):
         store_hint_set(self.q, "python", "-", [h["text"] for h in GOOD])

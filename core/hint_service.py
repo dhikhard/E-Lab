@@ -13,6 +13,7 @@ Hints never affect points (see core.points).
 import json
 import logging
 import os
+import re
 
 from django.core.cache import cache
 
@@ -29,6 +30,7 @@ UNLOCKS_PER_MINUTE = 10  # per student, across all questions (each question is a
 HINTS_USE_STUDENT_CODE = os.environ.get("HINTS_USE_STUDENT_CODE", "false").lower() == "true"
 SUPPORTED_LANGUAGES = ("c", "cpp", "python", "java")
 
+QUEUE_EXPIRY = 600  # seconds a queued generation may wait for the llm worker
 _INFLIGHT_KEY = "hints:inflight:{key}"
 _FAILED_KEY = "hints:failed:{key}"
 
@@ -44,6 +46,11 @@ def resolve_language(question, language_id=None):
         if chosen in SUPPORTED_LANGUAGES:
             return chosen
     return default if default in SUPPORTED_LANGUAGES else llm_hints.DEFAULT_LANGUAGE
+
+
+def student_code_digest(student, question):
+    """Cache-key digest of the student's code ("-" unless HINTS_USE_STUDENT_CODE)."""
+    return _code_digest(student, question)[0]
 
 
 def _code_digest(student, question):
@@ -89,15 +96,18 @@ def enqueue_hint_generation(question, language, code_digest="-", student_id=None
     key = llm_hints.cache_key(question, language, code_digest)
     if cache.get(_FAILED_KEY.format(key=key)):
         return False  # model recently failed for this key; fallback stays until backoff expires
-    if not cache.add(_INFLIGHT_KEY.format(key=key), 1, llm_hints.HINT_TIMEOUT * llm_hints.HINT_ATTEMPTS + 60):
+    # Covers the time the task may wait in the single-worker llm queue (it
+    # expires after QUEUE_EXPIRY) plus its own run time, so a queued job isn't
+    # duplicated by later unlocks while it waits.
+    if not cache.add(_INFLIGHT_KEY.format(key=key), 1, QUEUE_EXPIRY + llm_hints.HINT_TIMEOUT * llm_hints.HINT_ATTEMPTS + 60):
         return False
     from .tasks import generate_hint_set_task
 
-    generate_hint_set_task.apply_async(args=[question.id, language, code_digest, student_id], expires=600)
+    generate_hint_set_task.apply_async(args=[question.id, language, code_digest, student_id], expires=QUEUE_EXPIRY)
     return True
 
 
-def store_hint_set(question, language, code_digest, hints):
+def store_hint_set(question, language, code_digest, hints, student_id=None):
     GeneratedHintSet.objects.update_or_create(
         question=question,
         language=language,
@@ -109,10 +119,14 @@ def store_hint_set(question, language, code_digest, hints):
     cache.set(llm_hints.cache_key(question, language, code_digest), hints, llm_hints.CACHE_TTL)
     # Upgrade fallback rows students already unlocked for this question+language.
     # The UI polls and announces "AI Tutor hint updated", so this is not silent.
+    # A set generated from one student's code only upgrades that student's rows.
+    rows = StudentQuestionHint.objects.filter(question=question, language=language, hint_type="diagnostic")
+    if code_digest != "-":
+        if student_id is None:
+            return
+        rows = rows.filter(student_id=student_id)
     for tier, text in enumerate(hints, start=1):
-        StudentQuestionHint.objects.filter(
-            question=question, language=language, hint_number=tier, hint_type="diagnostic"
-        ).update(hint_text=text, hint_type="local_llm")
+        rows.filter(hint_number=tier).update(hint_text=text, hint_type="local_llm")
 
 
 def mark_generation_finished(question, language, code_digest, failed):
@@ -262,32 +276,34 @@ def _extract_failed_test_info(judge_output):
     return "Test case output mismatch"
 
 
+# Most specific first: a "stack using arrays" or "infix expression" program is a
+# stack problem, not an array or string one. Whole-word matches only, so "dp"
+# doesn't fire on "dpi" and "sort" doesn't fire on "resort".
+_TOPIC_KEYWORDS = [
+    ("linked_list", ["linked list", "node", "nodes", "next pointer", "doubly linked"]),
+    ("stack_queue", ["stack", "stacks", "queue", "queues", "push", "pop", "enqueue", "dequeue", "parentheses",
+                     "infix", "postfix", "prefix expression", "fifo", "lifo"]),
+    ("matrix", ["matrix", "matrices", "2d array", "grid", "rows", "columns", "transpose"]),
+    ("recursion", ["recursion", "recursive", "backtrack", "backtracking", "tower of hanoi", "permutation",
+                   "permutations", "combination", "combinations"]),
+    ("dp", ["dynamic programming", "dp", "fibonacci", "knapsack", "subsequence", "memoization"]),
+    ("sorting_searching", ["binary search", "search", "searching", "sort", "sorted", "sorting", "bubble sort",
+                           "quick sort", "merge sort"]),
+    ("string", ["palindrome", "anagram", "substring", "string", "strings", "character", "characters", "vowel",
+                "vowels"]),
+    ("pointers", ["pointer", "pointers", "malloc", "calloc", "dynamic memory", "dereference"]),
+    ("structures", ["structure", "structures", "struct", "union"]),
+    ("math_number", ["prime", "gcd", "lcm", "modulo", "factorial", "digit", "digits", "binary", "hexadecimal"]),
+]
+
+
 def _detect_question_topic(question):
     """Detects problem domain / data structure topic from question context."""
     text = f"{question.title} {question.description} {question.module.name if question.module else ''}".lower()
-
-    if any(k in text for k in ["matrix", "2d array", "grid", "rows", "columns", "transpose"]):
-        return "matrix"
-    if any(k in text for k in ["palindrome", "anagram", "substring", "string", "character", "vowel", "reverse string"]):
-        return "string"
-    if any(k in text for k in ["recursion", "recursive", "backtrack", "tower of hanoi", "permutation", "combination"]):
-        return "recursion"
-    if any(k in text for k in ["dynamic programming", "dp", "fibonacci", "knapsack", "subsequence", "memoization"]):
-        return "dp"
-    if any(k in text for k in ["binary search", "search", "sort", "bubble sort", "quick sort", "merge sort"]):
-        return "sorting_searching"
-    if any(k in text for k in ["linked list", "node", "next pointer", "doubly linked"]):
-        return "linked_list"
-    if any(k in text for k in ["pointer", "malloc", "calloc", "dynamic memory", "dereference"]):
-        return "pointers"
-    if any(k in text for k in ["structure", "struct", "record", "union"]):
-        return "structures"
-    if any(k in text for k in ["prime", "gcd", "lcm", "modulo", "factorial", "digit", "sum of digits", "binary", "hexadecimal"]):
-        return "math_number"
-    if any(k in text for k in ["stack", "queue", "parentheses", "fifo", "lifo"]):
-        return "stack_queue"
+    for topic, keywords in _TOPIC_KEYWORDS:
+        if any(re.search(rf"\b{re.escape(k)}\b", text) for k in keywords):
+            return topic
     return "general_array_loop"
-
 
 def _generate_diagnostic_hint(submission, hint_number):
     """Legacy wrapper for submission-based diagnostic generation."""

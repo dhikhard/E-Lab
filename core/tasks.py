@@ -42,12 +42,19 @@ def generate_hint_set_task(question_id, language, code_digest="-", student_id=No
     slow, down, or its output keeps failing the leak guard.
     """
     from . import llm_hints
-    from .hint_service import mark_generation_finished, store_hint_set
+    from .hint_service import get_hint_set, mark_generation_finished, store_hint_set
     from .models import Question, Submission
 
     question = Question.objects.filter(pk=question_id, is_active=True).first()
     if not question:
         return None
+    existing = get_hint_set(question, language, code_digest)
+    if existing:
+        # A duplicate job (queued again after the in-flight marker expired):
+        # just make sure fallback rows are upgraded, don't spend another CPU run.
+        store_hint_set(question, language, code_digest, existing, student_id)
+        mark_generation_finished(question, language, code_digest, failed=False)
+        return existing
     failed = True
     try:
         student_code = None
@@ -56,7 +63,7 @@ def generate_hint_set_task(question_id, language, code_digest="-", student_id=No
             student_code = latest.code if latest and llm_hints.code_hash(latest.code) == code_digest else None
         hints, info = llm_hints.generate_with_llm(question, language, student_code)
         if hints:
-            store_hint_set(question, language, code_digest, hints)
+            store_hint_set(question, language, code_digest, hints, student_id)
             failed = False
             return hints
         logger.info(f"LLM hints unavailable for Q{question_id} ({language}): {info}")

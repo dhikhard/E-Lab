@@ -38,7 +38,11 @@ class DashboardRoutingTests(TestCase):
 
 class HintSystemTests(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+
         from .models import Course, Module, Question
+
+        cache.clear()  # per-student unlock rate limits are keyed by user id, which the test DB reuses
         self.student = User.objects.create_user(
             username="test_student",
             password="password123",

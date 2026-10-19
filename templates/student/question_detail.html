@@ -389,13 +389,13 @@
           <div class="hint-display-item hint-level-{{ h.hint_number }}" id="hint-item-{{ h.hint_number }}">
             <div class="hint-item-header">
               <span class="hint-badge hint-badge-level-{{ h.hint_number }}">
-                {% if h.hint_number == 1 %}🌱 Hint 1: Theoretical Foundations
-                {% elif h.hint_number == 2 %}⚙️ Hint 2: Algorithmic &amp; Paradigm Theory
-                {% else %}🔍 Hint 3: Invariant Analysis &amp; Verification{% endif %}
+                {% if h.hint_number == 1 %}🌱 Hint 1: Understand the Problem
+                {% elif h.hint_number == 2 %}⚙️ Hint 2: Key Insight
+                {% else %}🔍 Hint 3: Common Pitfall{% endif %}
               </span>
               <span class="hint-timestamp">{{ h.unlocked_at|timesince }} ago</span>
             </div>
-            <div class="hint-item-text" data-raw="{{ h.hint_text }}">{{ h.hint_text }}</div>
+            <div class="hint-item-text" data-raw="{{ h.hint_text }}" data-hint-type="{{ h.hint_type }}">{{ h.hint_text }}</div>
           </div>
         {% endfor %}
 
@@ -406,21 +406,21 @@
               <div class="hint-locked-badge-row">
                 <span class="hint-locked-pill">🔒 Locked Hint #{{ hints_data.next_hint_number|default:1 }}</span>
                 <span class="hint-locked-tier">
-                  {% if hints_data.next_hint_number == 1 %}Tier 1: Theoretical Foundations
-                  {% elif hints_data.next_hint_number == 2 %}Tier 2: Algorithmic Theory
-                  {% else %}Tier 3: Conceptual Diagnostics{% endif %}
+                  {% if hints_data.next_hint_number == 1 %}Tier 1: Gentle
+                  {% elif hints_data.next_hint_number == 2 %}Tier 2: Stronger
+                  {% else %}Tier 3: Strongest{% endif %}
                 </span>
               </div>
               <h4 class="hint-locked-title" id="hint-next-locked-label">
-                {% if hints_data.next_hint_number == 1 %}🌱 Core Theoretical Foundations &amp; Principles
-                {% elif hints_data.next_hint_number == 2 %}⚙️ Algorithmic Paradigm &amp; Complexity Theory
-                {% elif hints_data.next_hint_number == 3 %}🔍 Invariant Analysis &amp; Conceptual Verification
-                {% else %}Progressive Theory Guidance{% endif %}
+                {% if hints_data.next_hint_number == 1 %}🌱 Hint 1: Understand the Problem
+                {% elif hints_data.next_hint_number == 2 %}⚙️ Hint 2: Key Insight
+                {% elif hints_data.next_hint_number == 3 %}🔍 Hint 3: Common Pitfall
+                {% else %}Progressive Hints{% endif %}
               </h4>
               <p class="hint-locked-desc" id="hint-next-locked-desc">
-                {% if hints_data.next_hint_number == 1 %}Unlock pure theoretical foundations, mathematical definitions, and domain invariants for this question without code.
-                {% elif hints_data.next_hint_number == 2 %}Unlock algorithmic paradigm theory, asymptotic complexity models, and conceptual logic flow without code.
-                {% else %}Unlock invariant verification, boundary edge-case analysis, and conceptual diagnostic guidance without code.{% endif %}
+                {% if hints_data.next_hint_number == 1 %}A nudge to make sure you understand the input, the output and the edge cases. No code.
+                {% elif hints_data.next_hint_number == 2 %}A question that points you towards the key property of this problem. No code.
+                {% else %}The most common mistake for this problem in your language. No code.{% endif %}
               </p>
             </div>
             <div class="hint-locked-cta">
@@ -429,9 +429,9 @@
                 <span class="unlock-btn-text">
                   <span class="unlock-label-main">Unlock Hint #{{ hints_data.next_hint_number|default:1 }}</span>
                   <span class="unlock-label-sub">
-                    {% if hints_data.next_hint_number == 1 %}Reveal Theory
-                    {% elif hints_data.next_hint_number == 2 %}Reveal Algorithmic Theory
-                    {% else %}Reveal Invariants{% endif %}
+                    {% if hints_data.next_hint_number == 1 %}Reveal Nudge
+                    {% elif hints_data.next_hint_number == 2 %}Reveal Insight
+                    {% else %}Reveal Pitfall{% endif %}
                   </span>
                 </span>
                 <svg class="unlock-btn-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -443,7 +443,7 @@
         {% if not hints_data.can_unlock_more %}
           <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 10px; font-size: 12.5px; color: var(--text-secondary);">
             <span style="font-size: 16px;">✨</span>
-            <span>All 3 progressive hints unlocked! Review the theory and blueprints above to solve the question.</span>
+            <span>All 3 progressive hints unlocked! Use them to work out the solution yourself.</span>
           </div>
         {% endif %}
       </div>
@@ -1507,15 +1507,18 @@ public class Main {
     }
 
     lines.forEach(line => {
-      if (line.startsWith("🧠") || /^(core\s*)?theor/i.test(line)) {
+      // Sections only for legacy emoji-tagged hints; plain LLM/fallback hints
+      // stay plain (an unanchored /logic|strategy/ used to retitle any hint
+      // that merely contained those words).
+      if (line.startsWith("🧠")) {
         flush();
         currentType = "theory";
         currentContent.push(line.replace(/^(🧠\s*)?((core\s*)?theoretical\s*foundations|theory\s*(&\s*concept)?\s*(\([^)]*\))?:?)?\s*/i, ""));
-      } else if (line.startsWith("🎯") || line.startsWith("⚙️") || line.startsWith("🛠️") || /^(algorithmic\s*)?paradigm|strategy|blueprint|logic/i.test(line)) {
+      } else if (line.startsWith("🎯") || line.startsWith("⚙️") || line.startsWith("🛠️")) {
         flush();
         currentType = "strategy";
         currentContent.push(line.replace(/^(🎯|⚙️|🛠️\s*)?((algorithmic\s*)?(paradigm|blueprint)|(conceptual\s*)?logic\s*flow|(recommended\s*)?strategy\s*(\([^)]*\))?:?)?\s*/i, ""));
-      } else if (line.startsWith("🔍") || line.startsWith("⚠️") || /^(invariant|error|conceptual\s*pitfall)/i.test(line)) {
+      } else if (line.startsWith("🔍") || line.startsWith("⚠️")) {
         flush();
         currentType = "fix";
         currentContent.push(line.replace(/^(🔍|⚠️\s*)?((invariant\s*(&\s*correctness)?\s*theory)|(conceptual\s*)?pitfalls?|(error\s*)?(localization|diagnosis)|actionable\s*fix\s*(direction)?\s*(\([^)]*\))?:?)?\s*/i, ""));
@@ -1530,21 +1533,21 @@ public class Main {
   function getHintMetadata(hintNum) {
     if (hintNum === 1) {
       return {
-        title: "🌱 Hint 1: Theoretical Foundations",
-        lockedTitle: "Hint #1: Theoretical Foundations (Locked)",
-        desc: "Unlock pure theoretical foundations, mathematical definitions, and domain invariants for this question without code."
+        title: "🌱 Hint 1: Understand the Problem",
+        lockedTitle: "Hint #1: Understand the Problem (Locked)",
+        desc: "A nudge to make sure you understand the input, the output and the edge cases. No code."
       };
     } else if (hintNum === 2) {
       return {
-        title: "⚙️ Hint 2: Algorithmic & Paradigm Theory",
-        lockedTitle: "Hint #2: Algorithmic & Paradigm Theory (Locked)",
-        desc: "Unlock algorithmic paradigm theory, asymptotic complexity models, and conceptual logic flow without code."
+        title: "⚙️ Hint 2: Key Insight",
+        lockedTitle: "Hint #2: Key Insight (Locked)",
+        desc: "A question that points you towards the key property of this problem. No code."
       };
     } else {
       return {
-        title: "🔍 Hint 3: Invariant Analysis & Verification",
-        lockedTitle: "Hint #3: Invariant Analysis & Verification (Locked)",
-        desc: "Unlock invariant verification, boundary edge-case analysis, and conceptual diagnostic guidance without code."
+        title: "🔍 Hint 3: Common Pitfall",
+        lockedTitle: "Hint #3: Common Pitfall (Locked)",
+        desc: "The most common mistake for this problem in your language. No code."
       };
     }
   }
@@ -1581,8 +1584,8 @@ public class Main {
     if (data.can_unlock_more) {
       const nextNum = data.next_hint_number;
       const nextMeta = getHintMetadata(nextNum);
-      const tierLabel = nextNum === 1 ? "Tier 1: Theoretical Foundations" : (nextNum === 2 ? "Tier 2: Algorithmic Theory" : "Tier 3: Conceptual Diagnostics");
-      const revealLabel = nextNum === 1 ? "Reveal Theory" : (nextNum === 2 ? "Reveal Algorithmic Theory" : "Reveal Invariants");
+      const tierLabel = nextNum === 1 ? "Tier 1: Gentle" : (nextNum === 2 ? "Tier 2: Stronger" : "Tier 3: Strongest");
+      const revealLabel = nextNum === 1 ? "Reveal Nudge" : (nextNum === 2 ? "Reveal Insight" : "Reveal Pitfall");
 
       html += `
         <div class="hint-locked-item" id="hint-locked-placeholder">
@@ -1613,7 +1616,7 @@ public class Main {
       html += `
         <div style="display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 12px; font-size: 13px; color: var(--text-secondary);">
           <span style="font-size: 18px;">⭐</span>
-          <span><strong>Theoretical Guidance Complete</strong> — All 3 progressive theory tiers have been unlocked for this question.</span>
+          <span><strong>All hints unlocked</strong> — all 3 progressive hints have been unlocked for this question.</span>
         </div>
       `;
     }
@@ -1636,33 +1639,40 @@ public class Main {
     return sel ? sel.value : "{{ question.language_id }}";
   }
 
+  let hintPollTimer = null;
   function pollForLlmHintUpgrade(questionId) {
-    if (!questionId) return;
-    let attempts = 0;
-    const maxAttempts = 30;  // ~90s: CPU-only generation of a new hint set can take a while
-    const timer = setInterval(async function() {
-      attempts += 1;
+    if (!questionId || hintPollTimer) return;
+    // CPU-only generation (up to two 90 s attempts, plus time waiting in the
+    // single-worker LLM queue) can take several minutes, so keep polling while
+    // the job is pending or running, backing off from 3 s to 15 s (~10 min max).
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let delay = 3000;
+    async function tick() {
+      hintPollTimer = null;
       try {
         const resp = await fetch(`/questions/${questionId}/hints/status/?language_id=${encodeURIComponent(currentHintLanguageId())}`);
         if (!resp.ok) throw new Error("status fetch failed");
         const data = await resp.json();
         const hasDiagnostic = (data.hints || []).some(h => h.hint_type === "diagnostic");
         if (!hasDiagnostic) {
-          clearInterval(timer);
           renderHintsData(data, false);
           showAnimatedNotification({
             type: "success",
             title: "💡 AI Tutor hint updated",
             message: "A question-tailored hint from the local AI tutor is ready."
           });
-        } else if (attempts >= maxAttempts || data.hint_generation_status === "complete" || data.hint_generation_status === "unavailable") {
-          clearInterval(timer);
+          return;
         }
+        // "unavailable": the model failed for now; keep the fallback hint.
+        if (data.hint_generation_status === "unavailable") return;
       } catch (e) {
-        if (attempts >= maxAttempts) clearInterval(timer);
+        // Network blip: try again on the next tick.
       }
-      if (attempts >= maxAttempts) clearInterval(timer);
-    }, 3000);
+      if (Date.now() >= deadline) return;
+      delay = Math.min(delay * 1.5, 15000);
+      hintPollTimer = setTimeout(tick, delay);
+    }
+    hintPollTimer = setTimeout(tick, delay);
   }
 
   function bindUnlockHintButton() {
@@ -1677,7 +1687,7 @@ public class Main {
         <span class="btn-spinner" style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; display: inline-block; animation: spin 0.8s linear infinite;"></span>
         <span class="unlock-btn-text">
           <span class="unlock-label-main">Unlocking Hint #${hintNum}…</span>
-          <span class="unlock-label-sub">Analyzing theory</span>
+          <span class="unlock-label-sub">Preparing hint</span>
         </span>
       `;
 
@@ -1725,13 +1735,17 @@ public class Main {
 
   // Format existing server-rendered hints on page load & bind button
   document.addEventListener("DOMContentLoaded", function() {
+    let hasFallbackHint = false;
     document.querySelectorAll("#hints-dynamic-list .hint-item-text").forEach(el => {
       const raw = el.getAttribute("data-raw") || el.innerText;
       if (raw) {
         el.innerHTML = formatHintContent(raw);
       }
+      if (el.dataset.hintType === "diagnostic") hasFallbackHint = true;
     });
     bindUnlockHintButton();
+    // A tailored hint may still be generating from before a reload.
+    if (hasFallbackHint) pollForLlmHintUpgrade({{ question.id }});
   });
 
   // Resizer logic (if present)

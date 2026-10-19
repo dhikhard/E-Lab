@@ -2,6 +2,7 @@
 import json
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -10,6 +11,7 @@ from .models import AssignedQuestion, Module, ModuleQuestionAssignment, Proctori
 
 class ProctoringEventTests(TestCase):
     def setUp(self):
+        cache.clear()  # rate limits are keyed by user id, which the test DB reuses between tests
         self.student = User.objects.create_user("p1", password="pw", role=User.Role.STUDENT)
         self.module = Module.objects.create(name="M")
         self.q = Question.objects.create(
