@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ SITE_NAME }}{% endblock %}</title>
   <link rel="icon" type="image/png" href="{% static 'img/Logologo.png' %}">
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=14.0">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=14.1">
   <script>
     (function() {
       const savedTheme = localStorage.getItem('theme') || 'light';
@@ -107,19 +107,20 @@
           y = rect.top + rect.height / 2;
         }
 
-        if (!document.startViewTransition) {
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (!document.startViewTransition || reduceMotion) {
           applyTheme(isDark);
           return;
         }
 
+        // The reveal's keyframes read --x/--y when the animation is created,
+        // so the origin must be set before the transition starts (not in .ready).
+        rootElement.style.setProperty('--x', `${x}px`);
+        rootElement.style.setProperty('--y', `${y}px`);
         const transition = document.startViewTransition(() => {
           applyTheme(isDark);
         });
-
-        transition.ready.then(() => {
-          rootElement.style.setProperty('--x', `${x}px`);
-          rootElement.style.setProperty('--y', `${y}px`);
-        }).catch(error => {
+        transition.ready.catch(error => {
           console.error("Error during View Transition setup:", error);
         });
       });

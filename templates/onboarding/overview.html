@@ -13,7 +13,7 @@
     max-width: 1100px;
     margin: 0 auto;
     padding: 20px 0 60px;
-    animation: stylishPageEnter 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: stylishPageEnter 0.85s cubic-bezier(0.16, 1, 0.3, 1);
     perspective: 1200px;
   }
 
@@ -152,8 +152,15 @@
 
   .scroll-reveal.revealed {
     opacity: 1;
-    filter: blur(0px);
-    transform: translateY(0) scale(1) rotateX(0deg);
+    /* none rather than blur(0)/identity: nothing left that keeps a compositing
+       layer or softens text once the section has arrived */
+    filter: none;
+    transform: none;
+    will-change: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scroll-reveal { opacity: 1; filter: none; transform: none; will-change: auto; }
   }
 
   .section-card {
@@ -838,8 +845,11 @@
     });
 
     // Stylish Hyperspace Zoom-Out & Blur Transition on Navigation
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.querySelectorAll('.transition-link').forEach(link => {
       link.addEventListener('click', function(e) {
+        // Let new-tab clicks (Ctrl/Cmd/Shift/middle) and reduced motion behave normally.
+        if (reduceMotion || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         const targetUrl = this.href;
         document.body.style.transition = 'all 0.5s cubic-bezier(0.7, 0, 0.3, 1)';
@@ -850,6 +860,12 @@
           window.location.href = targetUrl;
         }, 460);
       });
+    });
+    // Coming back with the browser's Back button restores this page from the
+    // back/forward cache still faded out; undo the exit effect.
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      ['transition', 'transform', 'filter', 'opacity'].forEach(prop => document.body.style.removeProperty(prop));
     });
   });
 </script>

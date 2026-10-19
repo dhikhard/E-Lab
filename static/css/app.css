@@ -21,15 +21,6 @@
   }
 }
 
-@keyframes reveal-out {
-  from {
-    clip-path: circle(150% at var(--x) var(--y));
-  }
-  to {
-    clip-path: circle(0% at var(--x) var(--y));
-  }
-}
-
 ::view-transition-new(root) {
   animation: reveal-in 0.5s ease-in-out forwards;
   z-index: 1;
@@ -37,8 +28,9 @@
 }
 
 ::view-transition-old(root) {
-  animation: reveal-out 0.5s ease-in-out forwards;
-  animation-delay: 0.5s;
+  /* The new theme is revealed on top; the old snapshot just stays underneath.
+     (A delayed reveal-out here doubled the transition and blocked clicks for 1 s.) */
+  animation: none;
   z-index: 0;
   mix-blend-mode: normal;
 }
@@ -1985,12 +1977,12 @@ body.dashboard-page .page {
 
 .submit-progress.is-visible {
   display: block;
-  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; translate: 0 -8px; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 .submit-progress-fill {
@@ -2010,12 +2002,12 @@ body.dashboard-page .page {
 
 .progress-circle.is-visible {
   display: flex;
-  animation: fadeScaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeScaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeScaleIn {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+  from { opacity: 0; scale: 0.9; }
+  to { opacity: 1; scale: 1; }
 }
 
 .progress-circle-ring {
@@ -2687,12 +2679,12 @@ th {
   border: 1px solid rgba(200, 111, 201, 0.15);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes slideUpFade {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; translate: 0 8px; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 .test-result-item.passed {
@@ -5388,32 +5380,23 @@ body.is-maximized-page .monaco-editor {
 
 /* Global animation utilities */
 .animate-fade-in {
-  animation: fadeIn 0.6s ease-out forwards;
-  opacity: 0;
+  animation: fadeIn 0.6s ease-out both;
 }
 
 .animate-slide-up {
-  animation: slideUp 0.5s ease-out forwards;
-  opacity: 0;
-  transform: translateY(20px);
+  animation: slideUp 0.5s ease-out both;
 }
 
 .animate-slide-in-left {
-  animation: slideInLeft 0.5s ease-out forwards;
-  opacity: 0;
-  transform: translateX(-30px);
+  animation: slideInLeft 0.5s ease-out both;
 }
 
 .animate-slide-in-right {
-  animation: slideInRight 0.5s ease-out forwards;
-  opacity: 0;
-  transform: translateX(30px);
+  animation: slideInRight 0.5s ease-out both;
 }
 
 .animate-zoom-in {
-  animation: zoomIn 0.4s ease-out forwards;
-  opacity: 0;
-  transform: scale(0.9);
+  animation: zoomIn 0.4s ease-out both;
 }
 
 .animate-pulse {
@@ -5422,9 +5405,7 @@ body.is-maximized-page .monaco-editor {
 
 /* Staggered animations for lists and grids */
 .staggered-animate > * {
-  opacity: 0;
-  transform: translateY(15px);
-  animation: fadeInUp 0.4s ease-out forwards;
+  animation: fadeInUp 0.4s ease-out both;
 }
 
 .staggered-animate > *:nth-child(1) { animation-delay: 0.05s; }
@@ -5558,9 +5539,7 @@ body.is-maximized-page .monaco-editor {
 
 .text-reveal span {
   display: inline-block;
-  opacity: 0;
-  transform: translateY(10px);
-  animation: fadeInUp 0.3s ease forwards;
+  animation: fadeInUp 0.3s ease both;
 }
 
 .text-reveal span:nth-child(1) { animation-delay: 0.05s; }
@@ -5597,65 +5576,31 @@ body.is-maximized-page .monaco-editor {
 }
 
 @keyframes slideUp {
-  from { 
-    opacity: 0; 
-    transform: translateY(20px); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateY(0); 
-  }
+  from { opacity: 0; translate: 0 20px; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 @keyframes slideInLeft {
-  from { 
-    opacity: 0; 
-    transform: translateX(-30px); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateX(0); 
-  }
+  from { opacity: 0; translate: -30px 0; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 @keyframes slideInRight {
-  from { 
-    opacity: 0; 
-    transform: translateX(30px); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateX(0); 
-  }
+  from { opacity: 0; translate: 30px 0; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 @keyframes zoomIn {
-  from { 
-    opacity: 0; 
-    transform: scale(0.9); 
-  }
-  to { 
-    opacity: 1; 
-    transform: scale(1); 
-  }
+  from { opacity: 0; scale: 0.9; }
+  to { opacity: 1; scale: 1; }
 }
 
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(15px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; translate: 0 15px; }
+  to { opacity: 1; translate: 0 0; }
 }
 
 /* Apply animations to key elements */
-body {
-  animation: fadeIn 0.8s ease-out;
-}
-
 /* Smooth transitions for dynamic elements */
 #test-results, .custom-output-section {
   transition: opacity 0.3s ease, transform 0.3s ease;
@@ -5704,12 +5649,13 @@ body {
 
 /* Notification and message animations */
 .messages, .message {
-  animation: slideInUp 0.4s ease-out;
+  animation: fadeInUp 0.4s ease-out both;  /* was the undefined "slideInUp" */
 }
 
 /* Dashboard enhancements */
 .dashboard-full > * {
-  animation: fadeInUp 0.5s ease-out;
+  /* `both`: hidden during the stagger delay instead of showing, vanishing, then fading in */
+  animation: fadeInUp 0.5s ease-out both;
 }
 
 .dashboard-full > *:nth-child(1) { animation-delay: 0.1s; }
@@ -5731,9 +5677,15 @@ body {
   box-shadow: 0 0 24px var(--mod-color), inset 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
-/* Form element focus enhancements */
+/* Form element focus enhancements: a soft ring, no size change (the old
+   `pulse` shrank every field to 95% on focus) */
 input:focus, select:focus, textarea:focus {
-  animation: pulse 0.6s ease-out;
+  animation: focusRing 0.6s ease-out;
+}
+
+@keyframes focusRing {
+  from { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35); }
+  to { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
 }
 
 /* Success/error state animations */
@@ -5973,6 +5925,15 @@ input:focus, select:focus, textarea:focus {
 [data-theme="light"] .hint-display-item {
   background: rgba(255, 255, 255, 0.85);
   border-color: rgba(124, 58, 237, 0.2);
+}
+
+.hint-display-item.hint-revealed-animation {
+  animation: hintItemReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes hintItemReveal {
+  from { opacity: 0; translate: 0 -10px; scale: 0.98; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
 }
 
 .hint-display-item.newly-unlocked {
@@ -6229,10 +6190,6 @@ input:focus, select:focus, textarea:focus {
   50% { transform: scale(1.12); filter: drop-shadow(0 0 8px rgba(253, 224, 71, 0.8)); }
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
 
 /* Split screen code editor mode */
 body.is-maximized-split .toolbar {
@@ -6366,11 +6323,78 @@ body.is-maximized-page .editor-header-bar { flex-wrap: wrap; row-gap: 8px; }
 }
 
 /* Honour the OS "reduce motion" setting: keep state changes, drop animation. */
+/* ── Entrance & feedback animations (motion/opacity only — no colour changes).
+      Card-level elements only: a transform on <main> or a page container would
+      re-anchor the fixed panels/overlays inside it. Individual `translate` /
+      `scale` properties are used so hover `transform` effects keep working. ── */
+.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item {
+  animation: fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(2) { animation-delay: 0.04s; }
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(3) { animation-delay: 0.08s; }
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(4) { animation-delay: 0.12s; }
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(5) { animation-delay: 0.16s; }
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(6) { animation-delay: 0.2s; }
+:is(.stat-card, .insight-card, .row-card, .course-card, .role-card, .module-progress-item):nth-child(n+7) { animation-delay: 0.24s; }
+
+/* Table rows fade in (first rows staggered; long tables don't wait) */
+.qbank-table tbody tr {
+  animation: fadeIn 0.35s ease-out both;
+}
+.qbank-table tbody tr:nth-child(2) { animation-delay: 0.03s; }
+.qbank-table tbody tr:nth-child(3) { animation-delay: 0.06s; }
+.qbank-table tbody tr:nth-child(4) { animation-delay: 0.09s; }
+.qbank-table tbody tr:nth-child(5) { animation-delay: 0.12s; }
+.qbank-table tbody tr:nth-child(n+6) { animation-delay: 0.15s; }
+
+/* Progress bars fill from the left on load */
+.progress-track span {
+  transform-origin: left center;
+  animation: barGrow 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+@keyframes barGrow {
+  from { scale: 0 1; }
+  to { scale: 1 1; }
+}
+
+/* Test results arrive one after another */
+.test-result-item:nth-child(2) { animation-delay: 0.05s; }
+.test-result-item:nth-child(3) { animation-delay: 0.1s; }
+.test-result-item:nth-child(4) { animation-delay: 0.15s; }
+.test-result-item:nth-child(n+5) { animation-delay: 0.2s; }
+
+/* Unread-alerts badge pops in */
+.notif-badge {
+  animation: badgePop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s both;
+}
+@keyframes badgePop {
+  from { opacity: 0; scale: 0.4; }
+  to { opacity: 1; scale: 1; }
+}
+
+/* AI agent drawer: result card and tab switches */
+.agent-result:not(.hidden) {
+  animation: slideUpFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.tab-pane:not(.hidden) {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+/* Flash messages arrive in order */
+.messages .message:nth-child(2) { animation-delay: 0.06s; }
+.messages .message:nth-child(n+3) { animation-delay: 0.12s; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
+  }
+  /* `*` doesn't match view-transition pseudo-elements (theme toggle reveal) */
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none !important;
   }
 }

@@ -10,7 +10,7 @@
     max-width: 1150px;
     margin: 0 auto;
     padding: 30px 0 70px;
-    animation: stylishPageEnter 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: stylishPageEnter 0.85s cubic-bezier(0.16, 1, 0.3, 1);
     perspective: 1200px;
   }
 
@@ -500,8 +500,11 @@
 <script>
   document.addEventListener("DOMContentLoaded", function() {
     // Stylish Hyperspace Zoom-Out & Blur Transition when entering C e-Lab
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.querySelectorAll('.transition-link').forEach(link => {
       link.addEventListener('click', function(e) {
+        // Let new-tab clicks (Ctrl/Cmd/Shift/middle) and reduced motion behave normally.
+        if (reduceMotion || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         const targetUrl = this.href;
         document.body.style.transition = 'all 0.5s cubic-bezier(0.7, 0, 0.3, 1)';
@@ -512,6 +515,12 @@
           window.location.href = targetUrl;
         }, 460);
       });
+    });
+    // Coming back with the browser's Back button restores this page from the
+    // back/forward cache still faded out; undo the exit effect.
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      ['transition', 'transform', 'filter', 'opacity'].forEach(prop => document.body.style.removeProperty(prop));
     });
   });
 </script>
