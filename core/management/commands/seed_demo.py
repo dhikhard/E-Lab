@@ -38,7 +38,7 @@ class Command(BaseCommand):
         
         self.stdout.write("\n✅ Demo data seeding completed!")
         self.stdout.write("\n🔑 Test Accounts:")
-        self.stdout.write("   HOD: hod / hodpassword")
+        self.stdout.write("   HOD: not seeded — run `manage.py create_hod --password <password>`")
         self.stdout.write("   Faculty: faculty_cs / faculty123, faculty_it / faculty123")
         self.stdout.write("   Students: student_fy_01 / student123, student_sy_01 / student123 (and others)")
         self.stdout.write("\n📝 Note: First year students see semester 1-2 content, second year see semester 1-4")

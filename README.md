@@ -9,10 +9,10 @@
 - ✅ **Interactive Code Editor** — Monaco / VS Code editor with syntax highlighting for C, C++, Java, and Python
 - ✅ **Automated Evaluation** — Instant feedback via isolated Docker sandbox containers with sub-second execution
 - ✅ **Multi-Language Support** — C (GCC C11), C++ (G++ C++17), Java (OpenJDK 17), Python (CPython 3)
-- ✅ **Adaptive Question Bank** — Tiered questions (Easy/Medium/Hard) with mandatory problem guarantees
+- ✅ **Adaptive Question Bank** — Tiered questions (Easy/Medium/Hard) with mandatory problem guarantees; DBMS modules use a single question list
 - ✅ **Progress Tracking** — Real-time dashboards showing module completion, scores, and class rankings
-- ✅ **Skill Certification** — Automated certificate generation with cryptographic QR verification for qualifying students
-- ✅ **Faculty & HOD Portals** — Create modules/questions, review submissions, manage certificate approvals
+- ✅ **Skill Certification** — Student → faculty → HoD approval flow; approved students get a PDF certificate with a QR code to a public verification page
+- ✅ **Faculty & HOD Portals** — Create modules/questions, edit questions and their test cases, review submissions, manage certificate approvals
 - ✅ **Quizzes & Assignments** — Timed quizzes and take-home open-ended assignments
 - ✅ **LeetCode Integration** — Bulk import 1,500+ public problems with test cases from local dataset
 - ✅ **RAG Question Generator** — Faculty generate sandbox-validated questions from the DSA notes or their own uploaded material with a local CPU-only LLM; questions are saved for review before going live
@@ -55,7 +55,7 @@
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/VazShalvin/E-Lab.git
+git clone https://github.com/kevincell/E-Lab.git
 cd E-Lab
 ```
 
@@ -91,6 +91,7 @@ OLLAMA_URL=http://elab-ollama:11434/api/chat
 HINT_MODEL=qwen3.5:4b
 OLLAMA_THINK=false
 OLLAMA_NUM_THREAD=6
+OLLAMA_NUM_CTX=6144
 
 # HOD account created by setup.sh / create_hod (no default password)
 HOD_PASSWORD=choose-a-strong-password
@@ -112,21 +113,18 @@ docker build -t elab-sandbox -f sandbox/Dockerfile sandbox/
 # 2. Start all services (Django, Postgres, Redis, Celery, Nginx, Ollama)
 docker compose up -d --build
 
-# 3. Pull the CPU models (one-time) — see step 5
-docker compose exec ollama ollama pull qwen3.5:4b
-docker compose exec ollama ollama pull nomic-embed-text
-
-# 4. Wait for services to be healthy
+# 3. Wait for services to be healthy
 docker compose ps
 ```
 
 ### 4. Initialize Database, Static Files & Questions
 ```bash
-# Apply database migrations
+# Migrations and collectstatic also run automatically when the app container starts
 docker compose exec app python manage.py migrate
-
-# Collect static files
 docker compose exec app python manage.py collectstatic --noinput
+
+# Create the HoD account (uses HOD_PASSWORD from .env if --password is omitted)
+docker compose exec app python manage.py create_hod --password '<choose-a-strong-password>'
 
 # Seed course catalog (C, Python, Java, C++, Placement Training)
 docker compose exec app python manage.py seed_courses
@@ -135,16 +133,16 @@ docker compose exec app python manage.py seed_courses
 docker compose exec app python manage.py import_questions
 
 # Bulk import 1,500 LeetCode questions with test cases
-docker compose exec app python manage.py import_leetcode_problems
+docker compose exec app python scripts/import_leetcode_problems.py
 
 # Enrich all questions to ~8 test cases each
 docker compose exec app python manage.py enrich_test_cases
 
-# Seed demo users (HOD, Faculty, First-Year & Second-Year Students)
+# Seed demo users (faculty and first/second/third-year students)
 docker compose exec app python manage.py seed_demo
 ```
 
-### 5. Pull the CPU models and build the question-generation index
+### 5. Pull the CPU models (one-time) and build the question-generation index
 The server has no GPU; everything below runs on the CPU.
 ```bash
 # Hint + question-generation model (~3.4 GB) and embedding model (~0.3 GB)
@@ -174,11 +172,11 @@ The web app is available at `http://localhost` (or your server IP):
 
 ## 🔑 Demo & Test Accounts
 
-Created automatically via `docker compose exec app python manage.py seed_demo`:
+Created via `docker compose exec app python manage.py seed_demo` (for demos only — never on a production server).
+The HoD account is not part of the demo data; create it with `create_hod` (step 4).
 
 | Role | Username | Password | Notes |
 |------|----------|----------|-------|
-| **HOD** | `hod` | `hodpassword` | Certificate approval, department overview |
 | **Faculty (CS)** | `faculty_cs` | `faculty123` | Module & question management |
 | **Faculty (IT)** | `faculty_it` | `faculty123` | Module & question management |
 | **Student (1st Yr)** | `student_fy_01` | `student123` | Semester 1 student |
@@ -188,7 +186,8 @@ Created automatically via `docker compose exec app python manage.py seed_demo`:
 | **Student (2nd Yr)** | `student_sy_02` | `student123` | Semester 3 student |
 | **Student (2nd Yr)** | `student_sy_03` | `student123` | Semester 4 student |
 | **Student (3rd Yr)** | `student_ty_01` | `student123` | Semester 5 student |
-| **Student (3rd Yr)** | `student_ty_02` | `student123` | Semester 6 student |
+| **Student (3rd Yr)** | `student_ty_02` | `student123` | Semester 5 student |
+| **Student (3rd Yr)** | `student_ty_03` | `student123` | Semester 6 student |
 
 ---
 
@@ -229,29 +228,30 @@ docker compose exec app python scripts/seed_leetcode_python.py
 docker compose exec app python manage.py seed_placement_training
 
 # Import third-year advanced placement questions
-docker compose exec app python manage.py advanced_seed_placement_training
+docker compose exec app python manage.py seed_advanced_placement_training
+
+# Create the DBMS (SQL) course: 3 modules × 5 questions (replaces its modules if it exists)
+docker compose exec app python scripts/create_dbms_course.py
 ```
 
-### Generate Student Certificates
-Scans student progress and issues certificates to eligible students:
+### Certificates
+Certificates are issued only through the approval flow (see **Certificate Flow** below). This command issues
+certificates for HoD-approved requests that don't have one yet and renders missing PDFs:
 ```bash
-# Generate certificates (default threshold: 80%)
+# Backfill missing certificates / PDFs
 docker compose exec app python manage.py generate_certificates
 
-# Custom threshold (e.g. 60%)
-docker compose exec app python manage.py generate_certificates --threshold 60
-
-# Dry-run mode (preview eligible students without writing records)
+# Preview without changing anything
 docker compose exec app python manage.py generate_certificates --dry-run
+
+# Re-render every certificate PDF (e.g. after editing templates/certificates/hi.svg)
+docker compose exec app python manage.py generate_certificates --regenerate
 ```
 
 ### Import Questions from LeetCode
 ```bash
 # Full bulk import (idempotent, skips existing)
-docker compose exec app python manage.py import_leetcode_problems
-
-# Test run on first 50 questions
-docker compose exec app python manage.py import_leetcode_problems --limit 50
+docker compose exec app python scripts/import_leetcode_problems.py
 
 # Import a single question by slug
 docker compose exec app python manage.py import_leetcode --question two-sum --module "LeetCode Problems" --difficulty easy --csv-level 1
@@ -281,8 +281,6 @@ docker compose exec app python manage.py enrich_test_cases --target 10
 docker compose exec app python scripts/clean_testcases.py
 ```
 
-
-
 ### Semester Management
 ```bash
 # Auto-advance student semesters (only acts on Jan 1 and Jul 1)
@@ -294,7 +292,7 @@ docker compose exec app python manage.py auto_advance_semesters --dry-run
 
 ### Create Users
 ```bash
-# Create dedicated HOD user
+# Create the HoD user (default username: hod)
 docker compose exec app python manage.py create_hod --password '<choose-a-strong-password>'
 
 # Create Django Superuser (for admin panel)
@@ -303,7 +301,7 @@ docker compose exec app python manage.py createsuperuser
 # Create a student user
 docker compose exec app python manage.py shell -c "
 from core.models import User
-u = User.objects.create_user(username='new_student', password='pass123', role='student', semester=3)
+u = User.objects.create_user(username='NNM25CC001', usn='NNM25CC001', password='<password>', role='student', department='CCE', semester=3)
 print(f'Created: {u}')
 "
 ```
@@ -322,16 +320,19 @@ polls and shows progress.
    split; ~1,200-character chunks with one-paragraph overlap.
 2. **Retrieval** — `nomic-embed-text` embeddings (stored with model + version; `rag_index` re-embeds stale chunks)
    blended with a keyword score, then de-duplicated. On 20 labelled queries, precision@3 went from 0.37 (old keyword
-   matcher) to 0.68. An empty or stale index produces a clear error, never zero silent questions.
+   matcher) to 0.68. The bundled `data/DSA_Topics` notes are loaded automatically on first use and embedded in the
+   background; until then (or while the embedding model is down) chunks are ranked by keywords only.
 3. **Generation** — one schema-constrained LLM call per question, with the retrieved chunks, topic, language,
    explicit easy/medium/hard criteria and an output schema (statement, formats, constraints, starter code,
-   reference solution, 5–8 tests, citations).
+   reference solution, 5–6 tests, citations). The fixed part of the prompt (rules + sources) comes first so
+   Ollama reuses its prompt cache for later questions in a job and for retries.
 4. **Validation** — a candidate is discarded unless: the JSON matches the schema; every citation is a retrieved
    chunk and the statement shares vocabulary with it; the code is in the requested language and the starter code
    doesn't contain the solution; **the reference solution, run in the Docker sandbox, prints every expected
-   output** and the starter code compiles; and it isn't a near-duplicate (embedding similarity ≥ 0.92) of an
-   existing question. One retry with the failure fed back is allowed. A heuristic flags suspicious difficulty labels.
-5. **Review** — accepted questions are saved **inactive**. Faculty review and activate them from the question bank.
+   output** and the starter code compiles; and it isn't a near-duplicate (embedding similarity ≥ 0.92, or a matching
+   title if embeddings are unavailable) of an existing question in the same course. One retry with the failure fed back is allowed. A heuristic flags suspicious difficulty labels.
+5. **Review** — accepted questions are saved **inactive** in the module they were generated for. Faculty review,
+   edit (including test cases) and activate them from the question bank.
 
 ```bash
 # CLI equivalents (also save inactive)
@@ -341,6 +342,22 @@ docker compose exec worker python manage.py bulk_generate_questions --topics "st
 docker compose exec worker python manage.py eval_question_gen --doc 04_Stack/01_valid_parentheses.md:python --count 3
 ```
 Results of the evaluation are in `core/evals/README.md`.
+
+---
+
+## 🎓 Certificate Flow
+
+1. **Student** — once a course reaches the threshold (`CERTIFICATE_THRESHOLD`, default 80%) with every mandatory
+   question solved, the course dashboard shows **Get Certificate**, which creates a request for that course.
+   Completion counts up to 12 questions per module (5 for DBMS modules, 7 for placement training, which issues no
+   certificates).
+2. **Faculty** — the faculty managing the course (all faculty if nobody manages it) are notified and forward the
+   request to the HoD from **Cert Requests** or the student's profile page, with optional remarks.
+3. **HoD** — reviews the course progress and submissions, then approves (the certificate is issued immediately) or
+   declines with remarks. A declined student can re-apply after solving at least one more question.
+4. **Certificate** — a PDF rendered from `templates/certificates/hi.svg` with the student's name and USN, the course,
+   the issue date, the verifying faculty and a QR code to the public `/verify/<hash>/` page. Students and faculty
+   download it from the certificate page.
 
 ---
 
@@ -415,6 +432,7 @@ The custom Docker sandbox executes code submissions in fully isolated containers
 | **C++** | 54 | GCC (`g++ -std=c++17`) | `-Wall -Wextra -Werror=return-type -Werror=main` |
 | **Java** | 62 | OpenJDK 17 (`javac`/`java`) | Auto-detects public class name |
 | **Python** | 71 | CPython 3 (`python3`) | Direct execution, syntax-checked |
+| **SQL** | 82 | SQLite | DBMS modules; the test input sets up the tables |
 
 ### Sandbox Security Flags
 - **No network** (`--network none`), **all capabilities dropped**, `no-new-privileges`, **runs as `nobody`**
@@ -434,10 +452,11 @@ The custom Docker sandbox executes code submissions in fully isolated containers
 # View live logs
 docker compose logs -f app
 docker compose logs -f worker
+docker compose logs -f worker-llm
 docker compose logs -f elab-db
 
 # Restart services after configuration change
-docker compose restart app worker nginx
+docker compose restart app worker worker-llm nginx
 
 # Stop all services
 docker compose down
@@ -524,8 +543,9 @@ hint sets ~23 s, embeddings for the whole corpus ~100 s, question generation sev
 - Every candidate rejected: the drawer lists the stage (schema, citation, grounding, language, execution, duplicate)
 
 ### 7. Certificate PDF Generation Fails
-- Ensure `weasyprint` dependencies are installed (included in Dockerfile)
-- Check media directory permissions: `chmod -R 777 media/`
+- PDFs are rendered with CairoSVG; check `docker compose logs app` for "PDF generation failed"
+- The certificate page retries a missing PDF on every visit; `python manage.py generate_certificates` retries all of them
+- Make sure the `media` volume is writable by the app container
 
 ### 8. Local AI / Tutor Hints Troubleshooting
 - **Ollama container status**: Verify Ollama is running: `docker compose ps ollama`.
