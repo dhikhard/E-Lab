@@ -789,13 +789,7 @@ def question_detail(request, question_id):
         submission.question = question
         if is_dbms_module and subquestion:
             submission.subquestion = subquestion
-        if display_question.allow_multiple_languages:
-            try:
-                submission.language_id = int(request.POST.get("language_id", display_question.language_id))
-            except ValueError:
-                submission.language_id = display_question.language_id
-        else:
-            submission.language_id = display_question.language_id
+        submission.language_id = effective_language_id(display_question, request.POST.get("language_id"))
         
         submission.save()
         claim_proctoring_events(submission)
@@ -1157,6 +1151,24 @@ def student_can_access_question(user, question):
 
 
 RUN_CODE_COOLDOWN_SECONDS = 3
+STUDENT_SELECTABLE_LANGUAGE_IDS = {50, 54, 62, 71}  # C, C++, Java, Python
+
+
+def effective_language_id(question, requested):
+    """
+    Language a run/submission actually uses. The student's choice only counts on
+    questions that allow multiple languages (and only C/C++/Java/Python);
+    otherwise it's the question's own language, so a C-only question can't be
+    solved and accepted in Python by sending another language_id.
+    """
+    if question.allow_multiple_languages:
+        try:
+            requested = int(requested)
+        except (TypeError, ValueError):
+            requested = None
+        if requested in STUDENT_SELECTABLE_LANGUAGE_IDS:
+            return requested
+    return question.language_id
 
 
 def can_run_code(user):
@@ -1253,12 +1265,7 @@ def run_code_api(request):
     from .sandbox import inject_headers as _inject_headers
     code = _inject_headers(code, question.starter_code)
 
-    # Determine the execution language (use provided or fallback to question's default)
-    try:
-        exec_language_id = int(language_id) if language_id else question.language_id
-    except (ValueError, TypeError):
-        exec_language_id = question.language_id
-    language = language_for_id(exec_language_id)
+    language = language_for_id(effective_language_id(question, language_id))
 
     # If custom input is provided, run only against that
     if custom_input is not None:
@@ -2508,7 +2515,7 @@ class SubmissionViewSet(
             raise Throttled(detail="Please wait 10 seconds before submitting again.")
         submission = serializer.save(
             student=self.request.user,
-            language_id=serializer.validated_data.get('language_id') or question.language_id,
+            language_id=effective_language_id(question, serializer.validated_data.get("language_id")),
             status=Submission.Status.PENDING,
         )
         claim_proctoring_events(submission)
@@ -2900,26 +2907,49 @@ def student_quiz_list(request):
     
     return render(request, "student/quiz_list.html", {"quizzes": quizzes})
 
+QUIZ_SUBMIT_GRACE_SECONDS = 60  # network delay / the timer's auto-submit landing just after the deadline
+
+
+def _quiz_deadline(attempt):
+    if not attempt.quiz.duration_minutes:
+        return None
+    return attempt.started_at + datetime.timedelta(minutes=attempt.quiz.duration_minutes)
+
+
 @login_required
 def student_quiz_take(request, quiz_id):
-    quiz = get_object_or_404(Quiz, pk=quiz_id, is_active=True)
+    quiz = get_object_or_404(Quiz.objects.select_related("course"), pk=quiz_id, is_active=True)
     if not quiz.is_open:
         messages.error(request, "This quiz is not currently open.")
         return redirect("student_quiz_list")
-        
+    course = quiz.course
+    if (not request.user.is_faculty_like and course and course.available_from_semester
+            and course.available_from_semester > (getattr(request.user, "semester", 1) or 1)):
+        messages.error(request, "This quiz's course is not available for your semester yet.")
+        return redirect("student_quiz_list")
+
     attempt, created = QuizAttempt.objects.get_or_create(
         quiz=quiz,
         student=request.user,
         defaults={"max_score": quiz.total_points}
     )
-    
-    if attempt.finished_at or attempt.is_timed_out:
+
+    if attempt.finished_at:
         messages.info(request, "You have already completed this quiz.")
         return redirect("student_quiz_results", quiz_id=quiz.id)
-        
+
+    deadline = _quiz_deadline(attempt)
+    now = timezone.now()
+    if deadline and now > deadline + datetime.timedelta(seconds=QUIZ_SUBMIT_GRACE_SECONDS):
+        if request.method == "POST":
+            messages.error(request, "The time limit for this quiz had passed, so these answers weren't accepted.")
+        else:
+            messages.info(request, "The time limit for this quiz has passed.")
+        return redirect("student_quiz_results", quiz_id=quiz.id)
+
     # Fetch questions
     questions_qs = quiz.quiz_questions.all().order_by('order')
-    
+
     if request.method == "POST":
         total_score = 0
         for qq in questions_qs:
@@ -2946,13 +2976,18 @@ def student_quiz_take(request, quiz_id):
         qq.shuffled_options = opts
         questions.append(qq)
 
-    return render(request, "student/quiz_take.html", {"quiz": quiz, "attempt": attempt, "questions": questions})
+    remaining_seconds = max(0, int((deadline - now).total_seconds())) if deadline else None
+    return render(request, "student/quiz_take.html", {
+        "quiz": quiz, "attempt": attempt, "questions": questions, "remaining_seconds": remaining_seconds,
+    })
 
 @login_required
 def student_quiz_results(request, quiz_id):
     quiz = get_object_or_404(Quiz, pk=quiz_id)
     attempt = get_object_or_404(QuizAttempt, quiz=quiz, student=request.user)
-    
+    if not attempt.finished_at and not attempt.is_timed_out:
+        return redirect("student_quiz_take", quiz_id=quiz.id)  # still in progress: nothing to show yet
+
     if not quiz.show_results:
         messages.info(request, "Results are currently hidden by the instructor.")
         return redirect("student_quiz_list")

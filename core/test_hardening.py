@@ -182,3 +182,83 @@ class AgentErrorLeakTests(TestCase):
         r = self.client.get(f"/api/faculty-agent/jobs/{job.pk}/")
         self.assertEqual(r.json()["status"], "failed")
         self.assertNotIn("hunter2", r.content.decode())
+
+
+class SubmissionLanguageTests(_Base):
+    """A question's language can't be swapped by sending another language_id."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()  # submit cooldowns are keyed by ids the test DB reuses
+        super().setUp()
+        self.assign(self.easy)  # language_id defaults to C (50), single language
+
+    @patch("core.views.evaluate_submission_task.delay")
+    def test_api_ignores_other_language_on_single_language_question(self, _delay):
+        r = self.client.post("/api/submissions/", data=json.dumps(
+            {"question": self.easy.id, "code": "print(1)", "language_id": 71}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Submission.objects.get().language_id, self.easy.language_id)
+
+    @patch("core.views.evaluate_submission_task.delay")
+    def test_multi_language_question_accepts_supported_choice_only(self, _delay):
+        from django.core.cache import cache
+
+        self.easy.allow_multiple_languages = True
+        self.easy.save()
+        self.client.post("/api/submissions/", data=json.dumps(
+            {"question": self.easy.id, "code": "print(1)", "language_id": 71}), content_type="application/json")
+        self.assertEqual(Submission.objects.latest("id").language_id, 71)
+        cache.clear()  # submit cooldown
+        self.client.post("/api/submissions/", data=json.dumps(
+            {"question": self.easy.id, "code": "select 1", "language_id": 82}), content_type="application/json")
+        self.assertEqual(Submission.objects.latest("id").language_id, self.easy.language_id)
+
+
+class QuizTimingTests(TestCase):
+    def setUp(self):
+        from .models import Quiz, QuizQuestion
+        self.student = User.objects.create_user("qs", password="pw", role=User.Role.STUDENT, semester=1)
+        self.course = Course.objects.create(name="C", slug="c-quiz")
+        self.quiz = Quiz.objects.create(title="Q", course=self.course, duration_minutes=10, is_active=True)
+        self.qq = QuizQuestion.objects.create(quiz=self.quiz, text="2+2", correct_option="B", points=5, order=1)
+        self.client.force_login(self.student)
+
+    def _age_attempt(self, minutes, seconds=0):
+        from .models import QuizAttempt
+        QuizAttempt.objects.filter(quiz=self.quiz).update(
+            started_at=timezone.now() - timedelta(minutes=minutes, seconds=seconds))
+
+    def test_page_shows_countdown(self):
+        r = self.client.get(f"/quizzes/{self.quiz.id}/")
+        self.assertContains(r, 'id="quiz-timer"')
+        self.assertTrue(570 <= r.context["remaining_seconds"] <= 600)
+
+    def test_answers_just_after_deadline_are_graded(self):
+        self.client.get(f"/quizzes/{self.quiz.id}/")
+        self._age_attempt(10, 20)  # auto-submit landed 20 s late
+        self.client.post(f"/quizzes/{self.quiz.id}/", {f"q_{self.qq.id}": "B"})
+        attempt = self.quiz.attempts.get()
+        self.assertIsNotNone(attempt.finished_at)
+        self.assertEqual(attempt.total_score, 5)
+
+    def test_answers_long_after_deadline_are_refused_honestly(self):
+        self.client.get(f"/quizzes/{self.quiz.id}/")
+        self._age_attempt(15)
+        r = self.client.post(f"/quizzes/{self.quiz.id}/", {f"q_{self.qq.id}": "B"}, follow=True)
+        attempt = self.quiz.attempts.get()
+        self.assertIsNone(attempt.finished_at)
+        self.assertTrue(attempt.is_timed_out)
+        self.assertContains(r, "time limit for this quiz had passed")
+
+    def test_results_mid_quiz_go_back_to_the_quiz(self):
+        self.client.get(f"/quizzes/{self.quiz.id}/")
+        r = self.client.get(f"/quizzes/{self.quiz.id}/results/")
+        self.assertRedirects(r, f"/quizzes/{self.quiz.id}/")
+
+    def test_course_not_yet_available_for_semester(self):
+        self.course.available_from_semester = 5
+        self.course.save()
+        r = self.client.get(f"/quizzes/{self.quiz.id}/")
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(self.quiz.attempts.exists())

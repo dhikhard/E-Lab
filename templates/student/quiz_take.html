@@ -5,7 +5,7 @@
 <section class="toolbar">
   <div>
     <h1>{{ quiz.title }}</h1>
-    <p class="muted">Time limit: {{ quiz.duration_minutes }} minutes</p>
+    <p class="muted">Time limit: {{ quiz.duration_minutes }} minutes{% if remaining_seconds is not None and not attempt.finished_at %} · <span id="quiz-timer" role="timer" aria-live="off" data-remaining="{{ remaining_seconds }}">Time left: --:--</span>{% endif %}</p>
   </div>
 </section>
 
@@ -17,7 +17,7 @@
       <a href="{% url 'student_quiz_results' quiz.id %}" class="btn primary">View Results</a>
     </div>
   {% else %}
-    <form method="post" class="stack">
+    <form method="post" class="stack" id="quiz-form">
       {% csrf_token %}
       {% for qq in questions %}
       <div class="profile-card" style="margin-bottom: 24px;">
@@ -45,4 +45,35 @@
     </form>
   {% endif %}
 </section>
+{% if remaining_seconds is not None and not attempt.finished_at %}
+<script>
+  // Countdown from the server's remaining time; at zero the answers given so far
+  // are submitted automatically (the server accepts them within a short grace period).
+  (function() {
+    const timer = document.getElementById("quiz-timer");
+    const form = document.getElementById("quiz-form");
+    if (!timer || !form) return;
+    const endsAt = Date.now() + Number(timer.dataset.remaining) * 1000;
+    let submitted = false;
+    form.addEventListener("submit", function() { submitted = true; });
+    function fmt(totalSeconds) {
+      const m = Math.floor(totalSeconds / 60), s = totalSeconds % 60;
+      return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    }
+    function tick() {
+      const left = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      timer.textContent = "Time left: " + fmt(left);
+      if (left === 60) timer.setAttribute("aria-live", "polite");  // announce the last minute once
+      if (left === 0 && !submitted) {
+        submitted = true;
+        timer.textContent = "Time is up — submitting your answers…";
+        form.submit();  // bypasses `required`, so unanswered questions just score 0
+        return;
+      }
+      if (left > 0) setTimeout(tick, 1000);
+    }
+    tick();
+  })();
+</script>
+{% endif %}
 {% endblock %}
