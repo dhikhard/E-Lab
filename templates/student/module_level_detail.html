@@ -3,17 +3,19 @@
 {% block content %}
 <section class="toolbar">
   <div>
-    <h1>{{ module.name }}{% if 'placement_training' not in module.category %} - {{ difficulty_label }}{% endif %}</h1>
+    <h1>{{ module.name }}{% if 'placement_training' not in module.category and not is_dbms_module %} - {{ difficulty_label }}{% endif %}</h1>
     <p class="muted">
       {% if 'placement_training' in module.category %}
       Your randomized 7-question set.
+      {% elif is_dbms_module %}
+      Your {{ questions|length }}-question set for this module.
       {% else %}
       Your randomized 5-question {{ difficulty_label|lower }} set.
       {% endif %}
     </p>
   </div>
   <div class="actions">
-    {% if 'placement_training' not in module.category %}<a class="secondary as-link" href="{% url 'module_detail' module.id %}">Levels</a>{% endif %}
+    {% if 'placement_training' not in module.category and not is_dbms_module %}<a class="secondary as-link" href="{% url 'module_detail' module.id %}">Levels</a>{% endif %}
     <a class="secondary as-link" href="{% url 'dashboard' %}">Dashboard</a>
   </div>
 </section>
@@ -21,7 +23,7 @@
 {% if assigned_slots %}
   <section class="panel module-path">
     <div class="section-heading">
-      <h2>{% if module.category == "advanced_placement_training" %}Advanced Placement Training{% elif module.category == "placement_training" %}Placement Training{% else %}{{ difficulty_label }}{% endif %} Questions</h2>
+      <h2>{% if module.category == "advanced_placement_training" %}Advanced Placement Training{% elif module.category == "placement_training" %}Placement Training{% elif is_dbms_module %}Module{% else %}{{ difficulty_label }}{% endif %} Questions</h2>
       <p class="muted">Solve these questions in any order to complete the set.</p>
     </div>
     <div class="path-steps">
@@ -61,7 +63,7 @@
 {% else %}
   <div class="panel" style="margin-bottom: 20px; border-left: 4px solid var(--accent-primary); padding: 16px; background: rgba(31, 41, 55, 0.4);">
     <h3 style="margin: 0 0 6px;">Faculty Overview Mode</h3>
-    <p class="muted" style="margin: 0;">You are viewing all <strong>{{ questions|length }} questions</strong> available in this difficulty level. When a student accesses this level, the system dynamically assigns them a randomized adaptive set of exactly <strong>5 questions</strong>.</p>
+    <p class="muted" style="margin: 0;">You are viewing all <strong>{{ questions|length }} questions</strong> available in this {% if is_dbms_module %}module{% else %}difficulty level{% endif %}. When a student opens it, the system assigns them a randomized adaptive set of up to <strong>5 questions</strong>.</p>
   </div>
   <div class="list">
     {% for question in questions %}
@@ -90,7 +92,7 @@
         </a>
       {% endif %}
     {% empty %}
-      <p class="muted">No {{ difficulty_label|lower }} questions in this module yet.</p>
+      <p class="muted">No {% if not is_dbms_module %}{{ difficulty_label|lower }} {% endif %}questions in this module yet.</p>
     {% endfor %}
   </div>
 {% endif %}

@@ -1,104 +1,51 @@
 #!/usr/bin/env python
 """
-Django management command to generate certificates for eligible students.
+Issue certificates for HoD-approved requests that don't have one yet, and
+render missing PDFs. Certificates are only ever issued through the
+student → faculty → HoD approval flow; this command never bypasses it.
 
-A student is eligible if their overall completion percentage across all active
-modules meets or exceeds the threshold (default: 80%).
+    python manage.py generate_certificates             # backfill missing certificates/PDFs
+    python manage.py generate_certificates --regenerate # re-render every PDF (e.g. after a template change)
 """
 
 from django.core.management.base import BaseCommand
-from django.db.models import Avg
 
-from core.models import Certificate, Progress, User
+from core.models import Certificate, CertificateRequest
+from core.services import issue_certificate
 
 
 class Command(BaseCommand):
-    help = "Generate certificates for students who have met the completion threshold."
+    help = "Issue certificates for approved requests and (re-)render certificate PDFs."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--threshold",
-            type=float,
-            default=80.0,
-            help="Minimum average completion percentage required (default: 80).",
-        )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="List eligible students without creating certificates.",
-        )
+        parser.add_argument("--dry-run", action="store_true", help="List what would be done without changing anything.")
+        parser.add_argument("--regenerate", action="store_true", help="Re-render the PDF of every existing certificate.")
 
     def handle(self, *args, **options):
-        threshold = options["threshold"]
         dry_run = options["dry_run"]
-        semester_label = Certificate.current_semester_label()
+        rendered = failed = 0
 
-        self.stdout.write(
-            f"\n🎓 Generating certificates for semester: {semester_label}"
+        approved = (
+            CertificateRequest.objects.filter(status=CertificateRequest.Status.APPROVED, course__isnull=False)
+            .select_related("student", "course", "requested_by_faculty")
+            .order_by("updated_at")
         )
-        self.stdout.write(f"   Threshold: {threshold:.0f}%")
-        if dry_run:
-            self.stdout.write(self.style.WARNING("   DRY RUN — no certificates will be created.\n"))
-
-        students = User.objects.filter(role=User.Role.STUDENT)
-        created_count = 0
-        skipped_count = 0
-        ineligible_count = 0
-
-        for student in students:
-            # Compute average completion percentage across all modules
-            avg_data = Progress.objects.filter(student=student).aggregate(
-                avg_pct=Avg("percentage")
-            )
-            avg_pct = avg_data["avg_pct"] or 0.0
-
-            if avg_pct < threshold:
-                ineligible_count += 1
-                self.stdout.write(
-                    f"   ✗ {student.username} — {avg_pct:.1f}% (below threshold)"
-                )
+        for req in approved:
+            cert = Certificate.objects.filter(student=req.student, course=req.course).first()
+            if cert and cert.pdf and cert.qr_code and not options["regenerate"]:
                 continue
-
-            # Check if a certificate already exists for this semester
-            existing = Certificate.objects.filter(
-                student=student, semester=semester_label
-            ).exists()
-            if existing:
-                skipped_count += 1
-                self.stdout.write(
-                    f"   ~ {student.username} — already has a certificate for {semester_label}"
-                )
-                continue
-
+            label = f"{req.student.username} — {req.course.name}"
             if dry_run:
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"   ✔ {student.username} — eligible ({avg_pct:.1f}%) [DRY RUN]"
-                    )
-                )
-                created_count += 1
+                self.stdout.write(f"  would {'render' if cert else 'issue'}: {label}")
                 continue
-
-            # Create the certificate
-            verification_hash = Certificate.make_hash(student, semester_label, avg_pct)
-            cert, cert_created = Certificate.objects.get_or_create(
-                student=student,
-                semester=semester_label,
-                defaults={
-                    "completion_percentage": avg_pct,
-                    "verification_hash": verification_hash,
-                },
-            )
-            if cert_created:
-                created_count += 1
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"   ✔ Certificate created for {student.username} ({avg_pct:.1f}%)"
-                    )
-                )
+            if cert and options["regenerate"] and cert.pdf:
+                cert.pdf.delete(save=True)  # issue_certificate re-renders a missing PDF
+            cert = issue_certificate(req.student, req.course, req.completion_percentage, req.requested_by_faculty)
+            if cert.pdf:
+                rendered += 1
+                self.stdout.write(self.style.SUCCESS(f"  ✔ {label}"))
             else:
-                skipped_count += 1
+                failed += 1
+                self.stdout.write(self.style.ERROR(f"  ✗ PDF failed: {label} (see logs)"))
 
-        self.stdout.write(
-            f"\n📊 Summary: {created_count} created | {skipped_count} skipped (already existed) | {ineligible_count} ineligible"
-        )
+        self.stdout.write(f"\nDone: {rendered + failed} processed, {rendered} with PDF, {failed} failed{' (dry run)' if dry_run else ''}.")

@@ -48,8 +48,12 @@
         ⏱️ Quizzes
       </a>
       {% if 'placement_training' not in category %}
-        {% if certificate_eligible %}
-          <a href="{% url 'certificate_create' %}" class="primary">Get Certificate</a>
+        {% if course_certificate %}
+          <a href="{% url 'certificate_detail' course_certificate.id %}" class="primary">View Certificate</a>
+        {% elif certificate_request.status == "pending_faculty" or certificate_request.status == "pending_hod" or certificate_request.status == "approved" %}
+          <a href="{% url 'certificate_create' %}?course={{ certificate_course.id }}" class="secondary">Certificate Status</a>
+        {% elif certificate_eligible %}
+          <a href="{% url 'certificate_create' %}?course={{ certificate_course.id }}" class="primary">Get Certificate</a>
         {% else %}
           <span class="locked-badge">Certificate locked</span>
         {% endif %}

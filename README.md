@@ -151,7 +151,9 @@ The server has no GPU; everything below runs on the CPU.
 docker compose exec ollama ollama pull qwen3.5:4b
 docker compose exec ollama ollama pull nomic-embed-text
 
-# Chunk + embed the bundled DSA notes (~2 minutes on an 8-core i7)
+# Chunk + embed the bundled DSA notes (~2 minutes on an 8-core i7). Optional: the notes are
+# also loaded automatically the first time the AI Question Agent is opened, and embedded in the
+# background; until then generation ranks them by keywords.
 docker compose exec worker python manage.py rag_index
 
 # Optional: pre-generate tutor hints before a lab (~25 s per question per language)
@@ -366,6 +368,7 @@ Results of the evaluation are in `core/evals/README.md`.
 | `HINT_LLM_TIMEOUT` | `90` | Seconds before falling back |
 | `HINTS_USE_STUDENT_CODE` | `false` | Send the student's own code (more specific, much less cacheable) |
 | `QUESTION_GEN_MODEL` | `HINT_MODEL` | Model for question generation |
+| `OLLAMA_NUM_CTX` | `6144` | Context window for every model request; one value for hints and generation so the model is never reloaded |
 | `EMBED_MODEL` | `nomic-embed-text` | Embedding model for retrieval and de-duplication |
 
 ---
@@ -516,7 +519,7 @@ hint sets ~23 s, embeddings for the whole corpus ~100 s, question generation sev
 - Restart worker: `docker compose restart worker`
 
 ### 6. Question Generator Issues
-- "index is empty or was built with a different embedding model": run `docker compose exec worker python manage.py rag_index`
+- "No source material is indexed yet": the `data/DSA_Topics` notes are missing from the image; or run `docker compose exec worker python manage.py rag_index`
 - Jobs stuck in "queued": check the LLM worker — `docker compose logs -f worker-llm`
 - Every candidate rejected: the drawer lists the stage (schema, citation, grounding, language, execution, duplicate)
 

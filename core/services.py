@@ -72,8 +72,14 @@ def student_performance_band(student):
     return "support"
 
 
+ALL_DIFFICULTIES = "all"  # assignment over every question of a module (DBMS modules have no levels)
+
+
 def choose_adaptive_questions(student, module, difficulty, count=5):
-    all_questions = list(module.questions.filter(is_active=True, difficulty=difficulty).order_by("csv_level", "id"))
+    questions = module.questions.filter(is_active=True)
+    if difficulty != ALL_DIFFICULTIES:
+        questions = questions.filter(difficulty=difficulty)
+    all_questions = list(questions.order_by("csv_level", "id"))
     rng = random.SystemRandom()
 
     mandatory_qs = [q for q in all_questions if q.is_mandatory]
@@ -89,8 +95,7 @@ def choose_adaptive_questions(student, module, difficulty, count=5):
         Submission.objects.filter(
             student=student,
             status=Submission.Status.ACCEPTED,
-            question__module=module,
-            question__difficulty=difficulty,
+            question__in=all_questions,
         ).values_list("question_id", flat=True)
     )
     unsolved = [question for question in optional_qs if question.id not in accepted_ids]
@@ -416,32 +421,52 @@ def _student_primary_category(student):
     return "c_programming"
 
 
+def module_question_quota(module, active_count):
+    """How many questions of a module count towards completion (same caps as the dashboard)."""
+    if module.category in ("placement_training", "advanced_placement_training"):
+        return min(7, active_count)
+    if "dbms" in (module.category or "").lower():
+        return min(5, active_count)
+    return min(12, active_count)
+
+
+def solved_in_module(student, module):
+    """Distinct active questions of `module` the student has solved. A DBMS question with
+    sub-questions counts once every active sub-question is accepted."""
+    accepted = Submission.objects.filter(
+        student=student, question__module=module, question__is_active=True, status=Submission.Status.ACCEPTED,
+    )
+    if "dbms" not in (module.category or "").lower():
+        return accepted.values("question_id").distinct().count()
+    from .models import SubQuestion
+
+    solved = 0
+    for question in module.questions.filter(is_active=True):
+        subs = set(SubQuestion.objects.filter(main_question=question, is_active=True).values_list("id", flat=True))
+        done = accepted.filter(question=question)
+        if subs:
+            solved += subs <= set(done.filter(subquestion__in=subs).values_list("subquestion_id", flat=True))
+        else:
+            solved += done.exists()
+    return solved
+
+
 def overall_percentage(student, course=None):
+    """Completion over a course's modules: solved questions (capped per module) / module quotas."""
     if course:
         target_modules = Module.objects.filter(course=course, is_active=True)
     else:
         category = _student_primary_category(student)
         target_modules = Module.objects.filter(is_active=True, category=category)
-    active_modules = target_modules.count()
 
-    total = active_modules * 12
-    if total == 0:
-        return 0
-
-    assigned_qs = AssignedQuestion.objects.filter(assignment__student=student, assignment__module__in=target_modules)
-    if assigned_qs.exists():
-        for assignment in ModuleQuestionAssignment.objects.filter(student=student, module__in=target_modules):
-            sync_assignment_completion(assignment)
-        completed = assigned_qs.filter(completed_at__isnull=False).count()
-    else:
-        completed = (
-            Submission.objects.filter(student=student, question__module__in=target_modules, question__is_active=True, status=Submission.Status.ACCEPTED)
-            .values_list("question_id", flat=True)
-            .distinct()
-            .count()
-        )
-
-    return min(100.0, (completed / total * 100))
+    total = completed = 0
+    for module in target_modules.annotate(active=Count("questions", filter=Q(questions__is_active=True))):
+        quota = module_question_quota(module, module.active)
+        if not quota:
+            continue
+        total += quota
+        completed += min(quota, solved_in_module(student, module))
+    return (completed / total * 100) if total else 0
 
 
 def certificate_eligible(student, course=None):
@@ -510,51 +535,68 @@ def get_faculty_coordinator_for_student(student):
     return None
 
 
+def certificate_course_for_student(student):
+    """The course a student's certificate is for when none is chosen: their semester's primary course."""
+    module = (
+        Module.objects.filter(category=_student_primary_category(student), course__isnull=False)
+        .select_related("course")
+        .order_by("order", "id")
+        .first()
+    )
+    return module.course if module else None
+
+
+def issue_certificate(student, course, percentage, faculty=None):
+    """
+    Create the student's certificate for `course` (one per student and course)
+    and make sure its QR code and PDF exist. Called once the HoD has approved,
+    so eligibility is not re-checked here. Returns the certificate.
+    """
+    cert = Certificate.objects.filter(student=student, course=course).order_by("issued_at").first()
+    created = cert is None
+    if created:
+        cert = Certificate.objects.create(
+            student=student,
+            course=course,
+            completion_percentage=percentage,
+            verification_hash=Certificate.make_hash(student, course, percentage),
+        )
+    if cert.qr_code and cert.pdf:
+        return cert
+
+    verify_url = f"{settings.SITE_BASE_URL.rstrip('/')}/verify/{cert.verification_hash}/"
+    update_fields = []
+    if not cert.qr_code:
+        qr_buffer = BytesIO()
+        qrcode.make(verify_url).save(qr_buffer, "PNG")
+        cert.qr_code.save(f"{cert.verification_hash}.png", ContentFile(qr_buffer.getvalue()), save=False)
+        update_fields.append("qr_code")
+    if not cert.pdf:
+        issued_date = timezone.localtime(cert.issued_at).strftime("%d/%m/%Y")
+        try:
+            pdf_bytes = generate_certificate_pdf(
+                student=student, course=course, issued_date=issued_date, verify_url=verify_url, faculty=faculty,
+            )
+            # Named by the unguessable hash: /media/ is served without authentication.
+            cert.pdf.save(f"{cert.verification_hash}.pdf", ContentFile(pdf_bytes), save=False)
+            update_fields.append("pdf")
+        except Exception as e:
+            logger.error(f"PDF generation failed for {student.username}: {e}", exc_info=True)
+    if update_fields:
+        cert.save(update_fields=update_fields)
+    if created:
+        notify_certificate(student, cert)
+    return cert
+
+
 def generate_certificate(student, course=None):
+    """Issue a certificate for `course` if the student is currently eligible, else None."""
+    if not course:
+        return None
     eligible, pct = certificate_eligible(student, course)
     if not eligible:
         return None
-
-    if not course:
-        return None
-
-    verification_hash = Certificate.make_hash(student, course, pct)
-    cert, created = Certificate.objects.get_or_create(
-        verification_hash=verification_hash,
-        defaults={
-            "student": student,
-            "course": course,
-            "completion_percentage": pct,
-        },
-    )
-    if not created and cert.pdf:
-        return cert
-
-    verify_url = f"{settings.SITE_BASE_URL}/verify/{verification_hash}/"
-    qr = qrcode.make(verify_url)
-    qr_buffer = BytesIO()
-    qr.save(qr_buffer, "PNG")
-    cert.qr_code.save(f"{verification_hash}.png", ContentFile(qr_buffer.getvalue()), save=False)
-
-    issued_at = timezone.localtime()
-    issued_date = issued_at.strftime("%d %B %Y")
-
-    from .certificate_generator import generate_certificate_pdf
-    try:
-        pdf_bytes = generate_certificate_pdf(
-            student=student,
-            percentage=pct,
-            semester=course.name,
-            issued_date=issued_date,
-            verify_url=verify_url,
-        )
-        name_usn = student.usn or student.username
-        cert.pdf.save(f"{name_usn}_{course.slug}.pdf", ContentFile(pdf_bytes), save=False)
-    except Exception as e:
-        logger.error(f"PDF generation failed for {student.username}: {e}")
-    cert.save()
-    notify_certificate(student, cert)
-    return cert
+    return issue_certificate(student, course, pct)
 
 
 def notify_certificate(student, certificate):
@@ -569,37 +611,49 @@ def notify_certificate(student, certificate):
         )
 
 
+def _course_faculty(course):
+    """Faculty who manage `course`, or every faculty member when nobody has opted into it."""
+    faculty = User.objects.filter(role=User.Role.FACULTY)
+    if course:
+        managers = faculty.filter(managed_courses=course).distinct()
+        if managers.exists():
+            return managers
+    return faculty
+
+
+def _course_label(course):
+    return f" for {course.name}" if course else ""
+
+
 def notify_faculty_of_eligible_student(student, course=None, is_reapplication=False):
-    """Create a notification for all faculty members when a student applies for certificate verification."""
+    """Notify the course's faculty when a student applies for certificate verification."""
     eligible, pct = certificate_eligible(student, course)
     if not eligible:
         return
 
-    faculty_users = User.objects.filter(role=User.Role.FACULTY)
-    for faculty in faculty_users:
+    who = f"{student.display_name} ({student.usn or student.username})"
+    for faculty in _course_faculty(course):
         if is_reapplication:
-            title = f"Certificate Re-application: {student.display_name}"
-            message = f"{student.display_name} ({student.usn or student.username}) has addressed review remarks, completed additional assignments ({pct:.1f}%), and re-applied for certificate verification."
             Notification.objects.create(
                 recipient=faculty,
                 notification_type=Notification.Type.CERT_ELIGIBLE,
-                title=title,
-                message=message,
+                title=f"Certificate Re-application: {student.display_name}",
+                message=f"{who} has addressed the review remarks, completed additional work ({pct:.1f}%) and re-applied for certificate verification{_course_label(course)}.",
                 related_student=student,
             )
-        else:
-            if not Notification.objects.filter(
+        elif not Notification.objects.filter(
+            recipient=faculty,
+            notification_type=Notification.Type.CERT_ELIGIBLE,
+            related_student=student,
+            is_read=False,
+        ).exists():
+            Notification.objects.create(
                 recipient=faculty,
                 notification_type=Notification.Type.CERT_ELIGIBLE,
+                title=f"Certificate Approval Requested: {student.display_name}",
+                message=f"{who} has completed {pct:.1f}% of the lab requirements and requested certificate verification{_course_label(course)}.",
                 related_student=student,
-            ).exists():
-                Notification.objects.create(
-                    recipient=faculty,
-                    notification_type=Notification.Type.CERT_ELIGIBLE,
-                    title=f"Certificate Approval Requested: {student.display_name}",
-                    message=f"{student.display_name} ({student.usn or student.username}) has completed {pct:.1f}% of lab requirements and requested certificate verification and approval.",
-                    related_student=student,
-                )
+            )
 
 
 def notify_hod_of_cert_request(cert_request):
@@ -612,7 +666,7 @@ def notify_hod_of_cert_request(cert_request):
             recipient=hod,
             notification_type=Notification.Type.CERT_FACULTY_REQUEST,
             title=f"{title_prefix}: {cert_request.student.display_name}",
-            message=f"Faculty {cert_request.requested_by_faculty.display_name} has verified and forwarded a certificate approval request for {cert_request.student.display_name} ({cert_request.completion_percentage:.1f}% complete).",
+            message=f"Faculty {cert_request.requested_by_faculty.display_name if cert_request.requested_by_faculty else ''} has verified and forwarded a certificate approval request{_course_label(cert_request.course)} for {cert_request.student.display_name} ({cert_request.completion_percentage:.1f}% complete).",
             related_student=cert_request.student,
         )
 
@@ -622,13 +676,13 @@ def notify_student_of_cert_decision(cert_request):
     if cert_request.status == CertificateRequest.Status.APPROVED:
         ntype = Notification.Type.CERT_HOD_APPROVED
         title = "Certificate Approved!"
-        message = "Congratulations! Your certificate has been approved by the HoD. You can now view and download your official academic diploma!"
+        message = f"Congratulations! Your certificate{_course_label(cert_request.course)} has been approved by the HoD. You can now view and download it."
         fac_title = f"Certificate Approved by HoD: {cert_request.student.display_name}"
         fac_msg = f"The Head of Department has approved and issued the official certificate for {cert_request.student.display_name} ({cert_request.student.usn or cert_request.student.username})."
     else:
         ntype = Notification.Type.CERT_HOD_REJECTED
         title = "Certificate Request Declined"
-        message = f"Your certificate request has been declined. Notes: {cert_request.hod_notes or 'No additional notes.'}"
+        message = f"Your certificate request{_course_label(cert_request.course)} has been declined. Notes: {cert_request.hod_notes or 'No additional notes.'}"
         fac_title = f"Certificate Declined by HoD: {cert_request.student.display_name}"
         fac_msg = f"The Head of Department declined the certificate request for {cert_request.student.display_name}. Remarks: {cert_request.hod_notes or 'No remarks provided.'}"
 
@@ -640,7 +694,7 @@ def notify_student_of_cert_decision(cert_request):
         related_student=cert_request.student,
     )
 
-    fac_recipients = [cert_request.requested_by_faculty] if cert_request.requested_by_faculty else User.objects.filter(role=User.Role.FACULTY)
+    fac_recipients = [cert_request.requested_by_faculty] if cert_request.requested_by_faculty else _course_faculty(cert_request.course)
     for fac in fac_recipients:
         if fac:
             Notification.objects.create(

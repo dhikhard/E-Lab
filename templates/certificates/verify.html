@@ -10,9 +10,9 @@
     <dl class="stats">
       <dt>Student</dt><dd>{{ certificate.student.display_name }}</dd>
       <dt>USN</dt><dd>{{ certificate.student.usn|default:"-" }}</dd>
-      <dt>Semester</dt><dd>{{ certificate.semester }}</dd>
+      <dt>Course</dt><dd>{{ certificate.course.name }}</dd>
       <dt>Completion</dt><dd>{{ certificate.completion_percentage|floatformat:1 }}%</dd>
-      <dt>Issued</dt><dd>{{ certificate.issued_at }}</dd>
+      <dt>Issued</dt><dd>{{ certificate.issued_at|date:"d M Y" }}</dd>
     </dl>
   </section>
 </div>

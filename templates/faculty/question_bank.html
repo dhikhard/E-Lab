@@ -33,6 +33,7 @@
         <span class="stat-value">{{ stats.total }}</span>
         <span class="stat-label">Total Questions</span>
       </div>
+      {% if not flat_list %}
       <div class="stat-card border-easy" style="cursor: pointer;" onclick="scrollToSection('easy')" title="Scroll to Easy questions">
         <span class="stat-value text-easy">{{ stats.easy }}</span>
         <span class="stat-label">Easy Level</span>
@@ -45,6 +46,7 @@
         <span class="stat-value text-hard">{{ stats.hard }}</span>
         <span class="stat-label">Hard Level</span>
       </div>
+      {% endif %}
       <div class="stat-card border-mandatory" style="cursor: pointer;" onclick="scrollToSection('mandatory')" title="Filter Lab Manual questions">
         <span class="stat-value text-mandatory">{{ stats.mandatory }}</span>
         <span class="stat-label">Lab Manual (Mandatory)</span>
@@ -58,9 +60,11 @@
       </div>
       <div class="filter-pills">
         <button class="filter-pill active" onclick="setFilter('all', this)">All</button>
+        {% if not flat_list %}
         <button class="filter-pill" onclick="setFilter('easy', this)">Easy</button>
         <button class="filter-pill" onclick="setFilter('medium', this)">Medium</button>
         <button class="filter-pill" onclick="setFilter('hard', this)">Hard</button>
+        {% endif %}
         <button class="filter-pill pill-mandatory" onclick="setFilter('mandatory', this)">Lab Manual Only</button>
       </div>
     </div>
@@ -76,7 +80,7 @@
           <span class="qbank-diff-badge
             {% if diff_label == 'Easy' %}badge-easy
             {% elif diff_label == 'Medium' %}badge-medium
-            {% else %}badge-hard{% endif %}
+            {% elif diff_label == 'Hard' %}badge-hard{% endif %}
           ">{{ diff_label }}</span>
           <span class="qbank-diff-count">{{ qs|length }} question{{ qs|length|pluralize }}</span>
         </div>
@@ -114,7 +118,7 @@
                       <small class="muted">{{ q.time_limit }}s / {{ q.memory_limit_kb|slice:":-3" }}MB</small>
                     </td>
                     <td class="col-tests">
-                      <a class="test-pill-link" href="{% url 'faculty_testcase_new' q.id %}" title="Add/Manage Test Cases">
+                      <a class="test-pill-link" href="{% url 'faculty_question_edit' q.id %}#test-cases" title="Add/Manage Test Cases">
                         <span class="test-pill">{{ q.test_count }} tests</span>
                       </a>
                     </td>

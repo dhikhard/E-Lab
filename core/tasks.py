@@ -108,6 +108,13 @@ def generate_questions_task(job_id):
 
     p = job.params
     try:
+        # Use the bundled DSA notes without anyone having to run `rag_index` first.
+        if retrieval.ensure_corpus_indexed():
+            progress("Loaded the bundled DSA notes")
+        if retrieval.stale_chunks().exists():
+            # Embedded after this job (the llm queue runs one task at a time); until then
+            # retrieval ranks the notes by keywords.
+            queue_index_embedding()
         result = generate.generate_questions(
             topic=p.get("topic", ""),
             difficulty=p.get("difficulty", "mixed"),
@@ -118,6 +125,7 @@ def generate_questions_task(job_id):
             progress=progress,
             deadline=time.monotonic() + generate.JOB_TIME_BUDGET,
             module_context=" / ".join(x for x in (p.get("course_name"), p.get("module_name")) if x),
+            module_id=p.get("module_id"),
         )
         job.result = result
         job.status = GenerationJob.Status.DONE
@@ -142,3 +150,31 @@ def embed_document_task(document_id):
     doc = RagDocument.objects.filter(pk=document_id).first()
     if doc:
         retrieval.embed_pending(document=doc)
+
+
+EMBED_INDEX_LOCK = "rag:embed-index-queued"
+
+
+def queue_index_embedding():
+    """Queue one background embedding pass over stale chunks (de-duplicated for an hour)."""
+    from django.core.cache import cache
+
+    if cache.add(EMBED_INDEX_LOCK, 1, 3600):
+        embed_index_task.delay()
+
+
+@app.task(soft_time_limit=1800, time_limit=1860)
+def embed_index_task():
+    """Embed every chunk that has no embedding for the current model (corpus and uploads)."""
+    from django.core.cache import cache
+
+    from .rag import retrieval
+
+    try:
+        retrieval.ensure_corpus_indexed()
+        return retrieval.embed_pending()
+    except retrieval.RetrievalError as exc:
+        logger.warning("RAG index embedding skipped: %s", exc)
+        return 0
+    finally:
+        cache.delete(EMBED_INDEX_LOCK)

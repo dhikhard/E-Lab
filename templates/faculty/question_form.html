@@ -6,7 +6,7 @@
     <p class="muted">{% if question %}{{ question.module.name }}{% else %}Create the problem and sample test in one pass{% endif %}</p>
   </div>
   <div class="actions">
-    <a class="secondary as-link" href="{% url 'dashboard' %}">Dashboard</a>
+    <a class="secondary as-link" href="{% if question %}{% url 'faculty_question_bank_module' question.module_id %}{% else %}{% url 'faculty_question_bank' %}{% endif %}">Question Bank</a>
     {% if question %}
       <a class="secondary as-link" href="{% url 'question_detail' question.id %}">Preview</a>
     {% endif %}
@@ -16,6 +16,7 @@
 <form method="post" class="question-builder">
   {% csrf_token %}
   <input type="hidden" name="action" value="save_question">
+  {% if form.non_field_errors %}<div class="field-error" style="grid-column: 1 / -1;">{{ form.non_field_errors }}</div>{% endif %}
 
   <section class="panel form-panel">
     <div class="section-heading">
@@ -25,6 +26,7 @@
     <div class="field-row">
       <p>{{ form.module.label_tag }}{{ form.module }}{{ form.module.errors }}</p>
       <p>{{ form.difficulty.label_tag }}{{ form.difficulty }}{{ form.difficulty.errors }}</p>
+      <p>{{ form.csv_level.label_tag }}{{ form.csv_level }}{{ form.csv_level.errors }}</p>
     </div>
     <div class="field-row">
       <p>{{ form.title.label_tag }}{{ form.title }}{{ form.title.errors }}</p>
@@ -62,27 +64,63 @@
       <p>{{ form.time_limit.label_tag }}{{ form.time_limit }}{{ form.time_limit.errors }}</p>
       <p>{{ form.memory_limit_kb.label_tag }}{{ form.memory_limit_kb }}{{ form.memory_limit_kb.errors }}</p>
     </div>
+    <label class="checkbox-row">{{ form.allow_multiple_languages }} <span>Students may solve in C, C++, Java or Python</span></label>
     <label class="checkbox-row">{{ form.is_mandatory }} <span>Mandatory for certificates</span></label>
+    <label class="checkbox-row">{{ form.proctoring_enabled }} <span>Proctoring enabled</span></label>
     <label class="checkbox-row">{{ form.is_active }} <span>Visible to students</span></label>
     <button class="primary full-width" type="submit">Save Question</button>
   </aside>
 </form>
 
-<section class="grid two question-tests">
+<section class="grid two question-tests" id="test-cases">
   <article class="panel">
     <div class="section-heading">
       <h2>Test Cases</h2>
-      <p class="muted">The sample output is saved as sample test #1 automatically.</p>
+      <p class="muted">The sample output is saved as sample test #1 automatically. Click a test to edit or delete it.</p>
     </div>
     <div class="list">
       {% for test in tests %}
-        <div class="row-card">
-          <span>
-            <strong>{% if test.is_sample %}Sample{% else %}Hidden{% endif %} #{{ test.order }}</strong>
-            <small>Input: {{ test.stdin|default:"empty"|truncatechars:45 }}</small>
-          </span>
-          <span>{{ test.expected_output|truncatechars:30 }}</span>
-        </div>
+        <details class="row-card test-case-row"{% if test.edit_errors %} open{% endif %} style="display: block;">
+          <summary style="display: flex; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none;">
+            <span>
+              <strong>{% if test.is_sample %}Sample{% else %}Hidden{% endif %} #{{ test.order }}</strong>
+              <small>Input: {{ test.stdin|default:"empty"|truncatechars:45 }}</small>
+            </span>
+            <span>{{ test.expected_output|truncatechars:30 }} <small class="muted">· Edit</small></span>
+          </summary>
+          <form method="post" class="form-grid" style="margin-top: 12px;">
+            {% csrf_token %}
+            <input type="hidden" name="test_id" value="{{ test.id }}">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="test-{{ test.id }}-stdin">Input (stdin)</label>
+                <textarea id="test-{{ test.id }}-stdin" name="stdin" rows="4">{{ test.stdin }}</textarea>
+              </div>
+              <div class="form-group">
+                <label for="test-{{ test.id }}-expected">Expected Output</label>
+                <textarea id="test-{{ test.id }}-expected" name="expected_output" rows="4" required>{{ test.expected_output }}</textarea>
+                {% if test.edit_errors.expected_output %}<div class="field-error">{{ test.edit_errors.expected_output.0 }}</div>{% endif %}
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="test-{{ test.id }}-order">Order</label>
+                <input id="test-{{ test.id }}-order" type="number" name="order" min="1" value="{{ test.order }}">
+                {% if test.edit_errors.order %}<div class="field-error">{{ test.edit_errors.order.0 }}</div>{% endif %}
+              </div>
+              <div class="form-group checkbox-inline">
+                <label class="checkbox-row">
+                  <input type="checkbox" name="is_sample" {% if test.is_sample %}checked{% endif %}>
+                  <span>Sample Test Case (shown to students)</span>
+                </label>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button class="secondary" type="submit" name="action" value="delete_test" formnovalidate onclick="return confirm('Delete this test case?');">Delete</button>
+              <button class="primary" type="submit" name="action" value="edit_test">Save Test</button>
+            </div>
+          </form>
+        </details>
       {% empty %}
         <p class="muted">Save the question with sample output to create the first test.</p>
       {% endfor %}

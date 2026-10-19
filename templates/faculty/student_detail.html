@@ -17,7 +17,7 @@
     <div>
       <p class="eyebrow">Student Profile</p>
       <h1>{{ viewed_student.display_name }}</h1>
-      <p class="muted">{{ viewed_student.usn|default:viewed_student.username }} · {{ questions_total }} questions across {{ modules|length }} modules</p>
+      <p class="muted">{{ viewed_student.usn|default:viewed_student.username }}{% if certificate_course %} · {{ certificate_course.name }}{% endif %} · {{ questions_total }} questions across {{ modules|length }} modules</p>
     </div>
     <div class="hero-score" style="--score: {{ overall_percentage|floatformat:0 }}">
       <div>
@@ -48,13 +48,14 @@
         {% elif existing_request.status == "rejected" %}
           The previous certificate request was declined. Student must fix remarks and reapply.
         {% else %}
-          This student has met all completion requirements (60%+ threshold & mandatory questions) and is eligible to apply for a certificate.
+          This student has met all completion requirements ({{ CERTIFICATE_THRESHOLD }}%+ threshold & mandatory questions) and is eligible to apply for a certificate.
         {% endif %}
       </p>
     </div>
     {% if existing_request.status == "pending_faculty" %}
       <form method="post" action="{% url 'faculty_send_cert_request' viewed_student.id %}" style="display: flex; gap: 8px; align-items: center; margin: 0;">
         {% csrf_token %}
+        <input type="hidden" name="request_id" value="{{ existing_request.id }}">
         <input type="text" name="notes" placeholder="Optional review remarks..." style="padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(128,128,128,0.3); font-size: 14px; width: 200px; background: var(--surface);">
         <button type="submit" class="primary" style="padding: 8px 18px; font-size: 14px; font-weight: 600; white-space: nowrap;">Forward Approval to HoD &rarr;</button>
       </form>
@@ -87,7 +88,7 @@
       <div style="display: flex; gap: 24px;">
         <div>
           <small class="muted" style="display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Department</small>
-          <strong style="font-size: 15px; color: var(--text-primary);">{{ viewed_student.department|default:"CCE" }}</strong>
+          <strong style="font-size: 15px; color: var(--text-primary);">{{ viewed_student.get_department_display|default:"CCE" }}</strong>
         </div>
         <div>
           <small class="muted" style="display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Semester</small>
@@ -216,8 +217,10 @@
     <div class="panel certificate-card">
       <p class="eyebrow">Certificates</p>
       <h3>Certificate Earned</h3>
-      <p class="muted">{{ certificates.0.semester }} · {{ certificates.0.completion_percentage|floatformat:1 }}%</p>
-      <a href="{% url 'certificate_detail' certificates.0.id %}" class="secondary">View Certificate</a>
+      {% for cert in certificates %}
+        <p class="muted">{{ cert.course.name }} · {{ cert.completion_percentage|floatformat:1 }}%</p>
+        <a href="{% url 'certificate_detail' cert.id %}" class="secondary">View Certificate</a>
+      {% endfor %}
     </div>
   </div>
   {% endif %}

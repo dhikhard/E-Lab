@@ -5,7 +5,7 @@
 <section class="toolbar">
   <div>
     <h1>Certificate Authorization Review</h1>
-    <p class="muted">Reviewing candidate progress and faculty verification report for {{ student.display_name }}</p>
+    <p class="muted">Reviewing candidate progress and faculty verification report for {{ student.display_name }}{% if course %} · {{ course.name }}{% endif %}</p>
   </div>
   <div class="actions">
     <a class="back-button as-link" href="{% url 'hod_dashboard' %}">&larr; Back to HoD Dashboard</a>
@@ -30,7 +30,7 @@
         </div>
         <div>
           <dt class="eyebrow">Department</dt>
-          <dd style="font-size: 16px;">{{ student.department|default:"CCE" }}</dd>
+          <dd style="font-size: 16px;">{{ student.get_department_display|default:"CCE" }}</dd>
         </div>
         <div>
           <dt class="eyebrow">Semester</dt>
@@ -52,15 +52,26 @@
           <p style="font-size: 15px; font-weight: 600; margin-top: 2px;">{{ cert_req.requested_by_faculty.display_name|default:"Faculty Member" }}</p>
         </div>
         <div>
+          <span class="eyebrow">Course</span>
+          <p style="font-size: 15px; font-weight: 600; margin-top: 2px;">{{ course.name|default:"Not linked to a course" }}</p>
+        </div>
+        <div>
           <span class="eyebrow">Submission Date</span>
           <p style="font-size: 14px; margin-top: 2px;">{{ cert_req.created_at|date:"F d, Y H:i" }}</p>
         </div>
         <div>
-          <span class="eyebrow">Overall Completion Status</span>
+          <span class="eyebrow">Completion When Forwarded</span>
+          <p style="font-size: 14px; margin-top: 2px;">{{ cert_req.completion_percentage|floatformat:1 }}%</p>
+        </div>
+        <div>
+          <span class="eyebrow">Current Completion</span>
           <div class="progress-cell" style="margin-top: 6px;">
             <span class="progress-track"><span style="width: {{ overall_pct|floatformat:0 }}%"></span></span>
             <strong>{{ overall_pct|floatformat:1 }}%</strong>
           </div>
+          {% if not currently_eligible and cert_req.status == "pending_hod" %}
+            <small style="color: var(--danger);">Below the {{ CERTIFICATE_THRESHOLD }}% threshold or a mandatory question is unsolved right now (new questions may have been added since the request).</small>
+          {% endif %}
         </div>
         <div>
           <span class="eyebrow">Faculty Notes</span>
@@ -68,6 +79,14 @@
             {{ cert_req.faculty_notes|default:"No notes attached by verifying faculty." }}
           </div>
         </div>
+        {% if previous_requests %}
+        <div>
+          <span class="eyebrow">Earlier Requests</span>
+          {% for prev in previous_requests %}
+            <p style="font-size: 13px; margin-top: 4px;">{{ prev.get_status_display }} · {{ prev.updated_at|date:"M d, Y" }}{% if prev.hod_notes %} — <span class="muted">{{ prev.hod_notes }}</span>{% endif %}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -98,6 +117,8 @@
                   </div>
                 </td>
               </tr>
+            {% empty %}
+              <tr><td colspan="3" class="muted">No modules in this course.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -135,7 +156,7 @@
     <form method="post" action="{% url 'hod_approve_certificate' cert_req.id %}" style="margin-top: 16px;">
       {% csrf_token %}
       <label style="display: block; margin-bottom: 16px;">
-        <span class="eyebrow" style="display: block; margin-bottom: 6px;">Decision Notes / Remarks (Optional)</span>
+        <span class="eyebrow" style="display: block; margin-bottom: 6px;">Decision Notes / Remarks (required when declining)</span>
         <textarea name="notes" rows="3" placeholder="Enter remarks (if rejecting, state reasons for student/faculty reference)..." style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(128,128,128,0.3); font-family: inherit;"></textarea>
       </label>
 
@@ -155,6 +176,9 @@
     <p>This request has already been processed: <strong>{{ cert_req.get_status_display }}</strong> on {{ cert_req.updated_at|date:"F d, Y H:i" }}.</p>
     {% if cert_req.hod_notes %}
       <p style="margin-top: 8px;" class="muted">Remarks: {{ cert_req.hod_notes }}</p>
+    {% endif %}
+    {% if certificate %}
+      <p style="margin-top: 12px;"><a class="secondary as-link" href="{% url 'certificate_detail' certificate.id %}">View Issued Certificate</a></p>
     {% endif %}
   </section>
 {% endif %}

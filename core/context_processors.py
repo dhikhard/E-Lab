@@ -5,6 +5,7 @@ from django.core.cache import cache
 def site_settings(request):
     ctx = {
         "SITE_NAME": settings.SITE_NAME,
+        "CERTIFICATE_THRESHOLD": settings.CERTIFICATE_THRESHOLD,
     }
     if hasattr(request, "user") and request.user.is_authenticated:
         cache_key = f"unread_notif_{request.user.id}"

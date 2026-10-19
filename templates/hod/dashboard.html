@@ -35,6 +35,10 @@
     <span class="eyebrow">Rejected Requests</span>
     <strong style="font-size: 28px; display: block; margin-top: 4px;">{{ rejected_count }}</strong>
   </div>
+  <div class="insight-card">
+    <span class="eyebrow">Awaiting Faculty Review</span>
+    <strong style="font-size: 28px; display: block; margin-top: 4px;">{{ awaiting_faculty_count }}</strong>
+  </div>
 </section>
 
 <!-- Pending Certificate Requests -->
@@ -52,6 +56,7 @@
         <tr>
           <th>Student</th>
           <th>USN</th>
+          <th>Course</th>
           <th>Completion %</th>
           <th>Requested By</th>
           <th>Date</th>
@@ -63,6 +68,7 @@
           <tr>
             <td><strong>{{ req.student.display_name }}</strong></td>
             <td>{{ req.student.usn }}</td>
+            <td>{{ req.course.name|default:"—" }}</td>
             <td>
               <div class="progress-cell">
                 <span class="progress-track"><span style="width: {{ req.completion_percentage|floatformat:0 }}%"></span></span>
@@ -70,14 +76,14 @@
               </div>
             </td>
             <td>{{ req.requested_by_faculty.display_name|default:"Faculty" }}</td>
-            <td>{{ req.created_at|date:"M d, Y" }}</td>
+            <td>{{ req.updated_at|date:"M d, Y" }}</td>
             <td style="text-align: right;">
               <a class="primary as-link" style="padding: 6px 14px; font-size: 13px;" href="{% url 'hod_review_request' req.id %}">Review &rarr;</a>
             </td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="6" class="muted" style="text-align: center; padding: 24px;">No pending certificate approval requests.</td>
+            <td colspan="7" class="muted" style="text-align: center; padding: 24px;">No pending certificate approval requests.</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -97,6 +103,7 @@
       <thead>
         <tr>
           <th>Student</th>
+          <th>Course</th>
           <th>Status</th>
           <th>Completion %</th>
           <th>Decided By</th>
@@ -106,7 +113,8 @@
       <tbody>
         {% for req in recent_decisions %}
           <tr>
-            <td><strong>{{ req.student.display_name }}</strong> <small class="muted">({{ req.student.usn }})</small></td>
+            <td><a href="{% url 'hod_review_request' req.id %}" class="as-link"><strong>{{ req.student.display_name }}</strong></a> <small class="muted">({{ req.student.usn }})</small></td>
+            <td>{{ req.course.name|default:"—" }}</td>
             <td>
               {% if req.status == "approved" %}
                 <span style="color: var(--success); font-weight: 700;">✓ Approved</span>
@@ -120,7 +128,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="5" class="muted" style="text-align: center; padding: 24px;">No past decisions recorded yet.</td>
+            <td colspan="6" class="muted" style="text-align: center; padding: 24px;">No past decisions recorded yet.</td>
           </tr>
         {% endfor %}
       </tbody>

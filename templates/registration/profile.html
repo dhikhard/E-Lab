@@ -26,7 +26,7 @@
       </div>
       <p class="profile-username">@{{ user.username }}{% if user.usn and user.usn != user.username %} • USN: {{ user.usn }}{% endif %}</p>
       {% if user.department %}
-        <p class="profile-dept">🏛️ {{ user.department }} {% if user.semester %}(Semester {{ user.semester }}){% endif %}</p>
+        <p class="profile-dept">🏛️ {{ user.get_department_display }} {% if user.semester %}(Semester {{ user.semester }}){% endif %}</p>
       {% endif %}
       {% if user.bio %}
         <p class="profile-bio-text">{{ user.bio }}</p>

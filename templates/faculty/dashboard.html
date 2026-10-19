@@ -27,7 +27,7 @@
       <label>
         <span>Department</span>
         <select name="department" onchange="this.form.submit()">
-          <option value="" {% if not selected_department %}selected{% endif %}>All Departments</option>
+          <option value="" {% if not selected_department %}selected{% endif %}>All Branches</option>
           {% for dept in departments %}
             <option value="{{ dept }}" {% if selected_department == dept %}selected{% endif %}>{{ dept }}</option>
           {% endfor %}

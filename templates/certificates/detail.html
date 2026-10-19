@@ -4,15 +4,15 @@
   <div>
     <p class="eyebrow" style="color: var(--success); font-weight: 700; display: flex; align-items: center; gap: 6px;">✓ VERIFIED & APPROVED</p>
     <h1 style="font-size: 32px; margin: 4px 0;">Official Academic Diploma</h1>
-    <p class="muted">Issued by Department of Computer and Communication Engineering (CCE e-Lab) · Semester {{ certificate.semester }}</p>
+    <p class="muted">Issued by Department of Computer and Communication Engineering (CCE e-Lab) · {{ certificate.course.name }}</p>
   </div>
   <div style="display: flex; gap: 12px; align-items: center;">
     {% if certificate.pdf %}
-      <a class="primary as-link" href="{{ certificate.pdf.url }}" download style="padding: 10px 20px; font-size: 15px; font-weight: 700; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3); display: inline-flex; align-items: center; gap: 8px;">
+      <a class="primary as-link" href="{% url 'certificate_download' certificate.id %}" style="padding: 10px 20px; font-size: 15px; font-weight: 700; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3); display: inline-flex; align-items: center; gap: 8px;">
         📥 Download Official PDF Diploma
       </a>
     {% endif %}
-    <a class="secondary as-link" href="{% url 'dashboard' %}">&larr; Back to Dashboard</a>
+    <a class="secondary as-link" href="{% if request.user == certificate.student %}{% url 'dashboard' %}{% else %}{% url 'faculty_student_detail' certificate.student.id %}{% endif %}">&larr; Back</a>
   </div>
 </section>
 
@@ -24,16 +24,16 @@
       <h3 style="margin: 0; font-size: 18px;">Diploma Preview</h3>
       <p class="muted" style="margin: 0; font-size: 13px;">This is your official university certificate, verified with a cryptographic hash and QR code.</p>
     </div>
-    <a class="secondary as-link" href="{{ certificate.pdf.url }}" target="_blank" style="font-size: 13px;">↗ Open PDF in New Tab</a>
+    <a class="secondary as-link" href="{% url 'certificate_download' certificate.id %}?inline=1" target="_blank" style="font-size: 13px;">↗ Open PDF in New Tab</a>
   </div>
   <div style="width: 100%; height: 720px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid rgba(255,255,255,0.1); background: #525659; display: flex; align-items: center; justify-content: center;">
-    <iframe src="{{ certificate.pdf.url }}#toolbar=0&navpanes=0&scrollbar=0" style="width: 100%; height: 100%; border: none;"></iframe>
+    <iframe src="{% url 'certificate_download' certificate.id %}?inline=1#toolbar=0&navpanes=0&scrollbar=0" style="width: 100%; height: 100%; border: none;"></iframe>
   </div>
 </div>
 {% else %}
 <div class="panel" style="margin-bottom: 32px; padding: 32px; text-align: center; border: 1px solid var(--accent-warm);">
-  <h3 style="color: var(--accent-warm);">Generating PDF Diploma...</h3>
-  <p class="muted">Your certificate has been approved! If your PDF preview doesn't appear immediately, please refresh the page in a few moments.</p>
+  <h3 style="color: var(--accent-warm);">PDF Not Available Yet</h3>
+  <p class="muted">Your certificate has been approved, but its PDF could not be generated just now. Refresh this page to try again; if it keeps failing, contact your faculty.</p>
 </div>
 {% endif %}
 
@@ -69,13 +69,13 @@
       <dd style="font-weight: 600; margin: 0; color: var(--text-primary);">{{ certificate.student.usn|default:certificate.student.username }}</dd>
       
       <dt style="color: var(--text-muted);">Department</dt>
-      <dd style="font-weight: 600; margin: 0; color: var(--text-primary);">{{ certificate.student.department|default:"Computer and Communication Engineering" }}</dd>
+      <dd style="font-weight: 600; margin: 0; color: var(--text-primary);">{{ certificate.student.get_department_display|default:"Computer and Communication Engineering" }}</dd>
       
-      <dt style="color: var(--text-muted);">Semester</dt>
-      <dd style="font-weight: 600; margin: 0; color: var(--text-primary);">{{ certificate.semester }}</dd>
+      <dt style="color: var(--text-muted);">Course</dt>
+      <dd style="font-weight: 600; margin: 0; color: var(--text-primary);">{{ certificate.course.name }}</dd>
       
       <dt style="color: var(--text-muted);">Lab Completion</dt>
-      <dd style="font-weight: 700; margin: 0; color: var(--success);">{{ certificate.completion_percentage|floatformat:1 }}% (Minimum 60% Met)</dd>
+      <dd style="font-weight: 700; margin: 0; color: var(--success);">{{ certificate.completion_percentage|floatformat:1 }}% (Minimum {{ CERTIFICATE_THRESHOLD }}% Met)</dd>
       
       <dt style="color: var(--text-muted);">Date Issued</dt>
       <dd style="margin: 0; color: var(--text-primary);">{{ certificate.issued_at|date:"F d, Y, h:i A" }}</dd>

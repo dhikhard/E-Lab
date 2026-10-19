@@ -118,6 +118,18 @@ def index_corpus(corpus_dir=CORPUS_DIR):
     return seen, changed
 
 
+def ensure_corpus_indexed(corpus_dir=CORPUS_DIR):
+    """
+    Load the bundled DSA corpus into the index the first time it's needed (DB
+    only, no embedding), so generation works without running `rag_index` by
+    hand. Returns the number of documents loaded (0 if already present).
+    """
+    if RagDocument.objects.filter(source=RagDocument.Source.CORPUS).exists() or not Path(corpus_dir).is_dir():
+        return 0
+    seen, _ = index_corpus(corpus_dir)
+    return seen
+
+
 def stale_chunks():
     return RagChunk.objects.exclude(embed_model=EMBED_MODEL, embed_version=EMBED_VERSION) | RagChunk.objects.filter(embedding__isnull=True)
 
@@ -176,28 +188,36 @@ def _lexical_scores(query, chunks):
 
 def search(query, k=4, document_ids=None, topic=None, mode="hybrid"):
     """
-    Return up to k distinct chunks for `query`. Raises RetrievalError if the
-    index is empty/stale or nothing relevant is found (never silently empty).
+    Return up to k distinct chunks for `query`. Uses hybrid semantic + keyword
+    ranking over chunks embedded with the current model; while the index isn't
+    embedded yet (or the embedding service is down) it ranks every chunk by
+    keywords alone, so the source material is still used. Raises
+    RetrievalError only if there is no source material or nothing matches.
     """
-    qs = RagChunk.objects.select_related("document").filter(embed_model=EMBED_MODEL, embed_version=EMBED_VERSION)
+    qs = RagChunk.objects.select_related("document")
     if document_ids:
         qs = qs.filter(document_id__in=document_ids)
     if topic:
         topic_qs = qs.filter(document__topic__icontains=topic.lower())
         if topic_qs.exists():
             qs = topic_qs
-    chunks = [c for c in qs if c.embedding]
+    current = qs.filter(embed_model=EMBED_MODEL, embed_version=EMBED_VERSION)
+    chunks = [c for c in current if c.embedding]
     if not chunks:
-        raise RetrievalError(
-            "The question-generation index is empty or was built with a different embedding model. "
-            "Run: python manage.py rag_index"
-        )
-    lexical = _lexical_scores(query, chunks) if mode in ("hybrid", "lexical") else [0.0] * len(chunks)
+        chunks = list(qs)
+        mode = "lexical"
+        if not chunks:
+            raise RetrievalError(
+                "No source material is indexed yet. Run: python manage.py rag_index (or upload study notes)."
+            )
+    qvec = None
     if mode in ("hybrid", "semantic"):
-        qvec = embed([query], kind="query")[0]
-        semantic = [cosine(qvec, c.embedding) for c in chunks]
-    else:
-        semantic = [0.0] * len(chunks)
+        try:
+            qvec = embed([query], kind="query")[0]
+        except RetrievalError:
+            mode = "lexical"  # embedding service down: keyword ranking still finds the right notes
+    lexical = _lexical_scores(query, chunks) if mode in ("hybrid", "lexical") else [0.0] * len(chunks)
+    semantic = [cosine(qvec, c.embedding) for c in chunks] if qvec is not None else [0.0] * len(chunks)
     if mode == "hybrid":
         scores = [SEMANTIC_WEIGHT * s + (1 - SEMANTIC_WEIGHT) * l for s, l in zip(semantic, lexical)]
     else:
@@ -210,7 +230,7 @@ def search(query, k=4, document_ids=None, topic=None, mode="hybrid"):
             break
         if chunk.content_hash in hashes:
             continue
-        if any(cosine(chunk.embedding, p.embedding) >= NEAR_DUPLICATE for _, p in picked):
+        if mode != "lexical" and any(cosine(chunk.embedding, p.embedding) >= NEAR_DUPLICATE for _, p in picked):
             continue
         picked.append((score, chunk))
         hashes.add(chunk.content_hash)

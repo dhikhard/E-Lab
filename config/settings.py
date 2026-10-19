@@ -211,6 +211,7 @@ CELERY_TASK_ROUTES = {
     "core.tasks.generate_llm_hint_task": {"queue": "llm"},
     "core.tasks.generate_questions_task": {"queue": "llm"},
     "core.tasks.embed_document_task": {"queue": "llm"},
+    "core.tasks.embed_index_task": {"queue": "llm"},
 }
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 

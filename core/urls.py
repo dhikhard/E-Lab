@@ -33,6 +33,7 @@ urlpatterns = [
     path("leaderboard/", views.leaderboard, name="leaderboard"),
     path("certificates/generate/", views.certificate_create, name="certificate_create"),
     path("certificates/<int:certificate_id>/", views.certificate_detail, name="certificate_detail"),
+    path("certificates/<int:certificate_id>/download/", views.certificate_download, name="certificate_download"),
     path("verify/<str:verification_hash>/", views.certificate_verify, name="certificate_verify"),
     path("lab-record/", views.student_lab_record, name="student_lab_record"),
     path("open-ended/", views.student_open_ended_list, name="student_open_ended_list"),

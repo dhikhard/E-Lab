@@ -20,7 +20,10 @@ import re
 import time
 
 import requests
+
 from django.core.cache import cache
+
+from . import ollama_options
 
 logger = logging.getLogger(__name__)
 llm_log = logging.getLogger("core.hints.llm")  # prompt/response log for quality review
@@ -292,16 +295,10 @@ def _call_model(messages):
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_ctx": 2048,
             "num_predict": 512,  # three 1-2 sentence hints + JSON; 320 truncated long answers into invalid JSON
-            "num_thread": int(os.environ.get("OLLAMA_NUM_THREAD", "4")),
         },
     }
-    if os.environ.get("OLLAMA_THINK", "false").lower() == "false":
-        payload["think"] = False  # for "thinking" models (e.g. qwen3.x): skip hidden reasoning tokens on CPU
-    if os.environ.get("OLLAMA_NUM_GPU") is not None:
-        # 0 forces CPU inference (the production server has no GPU; also used for honest benchmarks).
-        payload["options"]["num_gpu"] = int(os.environ["OLLAMA_NUM_GPU"])
+    ollama_options.apply(payload)  # same num_ctx as question generation, so the model is never reloaded
     resp = requests.post(OLLAMA_URL, json=payload, timeout=HINT_TIMEOUT)
     resp.raise_for_status()
     data = resp.json()

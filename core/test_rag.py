@@ -88,9 +88,25 @@ class RetrievalTests(TestCase):
         retrieval.upsert_document("corpus", "graph/islands.md", "Count Islands", "graph bfs dfs", GRID_DOC)
 
     def test_empty_index_raises_clear_error(self, _embed):
+        RagDocument.objects.all().delete()
         with self.assertRaises(retrieval.RetrievalError) as ctx:
             retrieval.search("brackets")
         self.assertIn("rag_index", str(ctx.exception))
+
+    def test_unembedded_index_falls_back_to_keywords(self, _embed):
+        hits = retrieval.search("matching brackets opening closing", k=2)
+        self.assertEqual(hits[0].document.title, "Balanced Brackets")
+
+    def test_embedding_service_down_falls_back_to_keywords(self, _embed):
+        retrieval.embed_pending()
+        with patch("core.rag.retrieval.embed", side_effect=retrieval.RetrievalError("down")):
+            hits = retrieval.search("matching brackets opening closing", k=2)
+        self.assertEqual(hits[0].document.title, "Balanced Brackets")
+
+    def test_corpus_loaded_automatically(self, _embed):
+        RagDocument.objects.all().delete()
+        self.assertGreater(retrieval.ensure_corpus_indexed(), 0)
+        self.assertEqual(retrieval.ensure_corpus_indexed(), 0)  # only once
 
     def test_search_returns_relevant_chunks_with_version_tag(self, _embed):
         retrieval.embed_pending()
@@ -103,8 +119,8 @@ class RetrievalTests(TestCase):
     def test_stale_model_chunks_are_ignored_until_reembedded(self, _embed):
         retrieval.embed_pending()
         RagChunk.objects.update(embed_model="old-model")
-        with self.assertRaises(retrieval.RetrievalError):
-            retrieval.search("brackets")
+        with patch("core.rag.retrieval.cosine", side_effect=AssertionError("stale vectors used")):
+            self.assertTrue(retrieval.search("brackets"))  # keyword ranking, old vectors ignored
         self.assertEqual(retrieval.stale_chunks().count(), RagChunk.objects.count())
         retrieval.embed_pending()
         self.assertTrue(retrieval.search("brackets"))

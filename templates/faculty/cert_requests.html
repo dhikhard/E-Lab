@@ -16,7 +16,7 @@
 <section class="panel" style="margin-bottom: 24px;">
   <div style="margin-bottom: 16px;">
     <h2>Certificate-Eligible Candidates</h2>
-    <p class="muted">Students who have surpassed the completion threshold (60%+) and finished all mandatory questions.</p>
+    <p class="muted">Students who have surpassed the completion threshold ({{ CERTIFICATE_THRESHOLD }}%+) and finished all mandatory questions.</p>
   </div>
 
   <div class="table-wrap">
@@ -25,6 +25,7 @@
         <tr>
           <th>Student</th>
           <th>USN</th>
+          <th>Course</th>
           <th>Completion %</th>
           <th>Verification Status</th>
           <th style="text-align: right;">Action</th>
@@ -40,11 +41,13 @@
               </a>
             </td>
             <td>{{ item.student.usn }}</td>
+            <td>{{ item.course.name|default:"—" }}</td>
             <td>
               <div class="progress-cell">
                 <span class="progress-track"><span style="width: {{ item.percentage|floatformat:0 }}%"></span></span>
                 <strong>{{ item.percentage|floatformat:1 }}%</strong>
               </div>
+              {% if not item.currently_eligible %}<small style="color: var(--danger);">No longer meets the criteria</small>{% endif %}
             </td>
             <td>
               {% if item.existing_request %}
@@ -58,9 +61,10 @@
             <td style="text-align: right;">
               <div style="display: flex; gap: 8px; justify-content: flex-end; align-items: center;">
                 <a href="{% url 'faculty_student_detail' item.student.id %}" class="secondary" style="padding: 6px 12px; font-size: 13px; text-decoration: none;">↗ Review Progress</a>
-                {% if item.existing_request.status == "pending_faculty" %}
+                {% if item.existing_request.status == "pending_faculty" and item.currently_eligible %}
                   <form method="post" action="{% url 'faculty_send_cert_request' item.student.id %}" style="display: inline-flex; gap: 8px; align-items: center; margin: 0;">
                     {% csrf_token %}
+                    <input type="hidden" name="request_id" value="{{ item.existing_request.id }}">
                     <input type="text" name="notes" placeholder="Optional notes..." style="padding: 6px 10px; border-radius: 4px; border: 1px solid rgba(128,128,128,0.3); font-size: 13px; width: 140px;">
                     <button type="submit" class="primary" style="padding: 6px 14px; font-size: 13px;">Forward to HoD &rarr;</button>
                   </form>
@@ -78,7 +82,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="5" class="muted" style="text-align: center; padding: 24px;">No new eligible students awaiting verification at this time.</td>
+            <td colspan="6" class="muted" style="text-align: center; padding: 24px;">No new eligible students awaiting verification at this time.</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -98,6 +102,7 @@
       <thead>
         <tr>
           <th>Student</th>
+          <th>Course</th>
           <th>Status</th>
           <th>Completion %</th>
           <th>HoD Reviewer</th>
@@ -108,6 +113,7 @@
         {% for req in my_requests %}
           <tr>
             <td><strong>{{ req.student.display_name }}</strong> <small class="muted">({{ req.student.usn }})</small></td>
+            <td>{{ req.course.name|default:"—" }}</td>
             <td>
               <span style="font-weight: 600;">{{ req.get_status_display }}</span>
               {% if req.hod_notes %}
@@ -116,11 +122,11 @@
             </td>
             <td>{{ req.completion_percentage|floatformat:1 }}%</td>
             <td>{{ req.approved_by_hod.display_name|default:"Pending Review" }}</td>
-            <td>{{ req.created_at|date:"M d, Y H:i" }}</td>
+            <td>{{ req.updated_at|date:"M d, Y H:i" }}</td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="5" class="muted" style="text-align: center; padding: 24px;">You have not sent any requests to the HoD yet.</td>
+            <td colspan="6" class="muted" style="text-align: center; padding: 24px;">You have not sent any requests to the HoD yet.</td>
           </tr>
         {% endfor %}
       </tbody>

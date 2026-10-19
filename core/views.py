@@ -9,6 +9,7 @@ import re
 import subprocess
 
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
@@ -16,9 +17,9 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.views import LoginView, LogoutView
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import connection
-from django.db.models import Count, Prefetch, Q
-from django.http import HttpResponse, JsonResponse
+from django.db import connection, transaction
+from django.db.models import Case, Count, Prefetch, Q, When
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.defaultfilters import slugify
@@ -48,11 +49,15 @@ from .models import AssignedQuestion, Certificate, CertificateRequest, Course, L
 from .sandbox import run_code as _local_run_code, language_for_id, inject_headers
 from .serializers import ProgressSerializer, QuestionSerializer, SubmissionSerializer
 from .services import (
+    certificate_course_for_student,
     certificate_eligible,
     close_open_attendance,
     current_unlocked_question,
-    generate_certificate,
+    ALL_DIFFICULTIES,
     get_or_create_module_assignment,
+    issue_certificate,
+    module_question_quota,
+    solved_in_module,
     notify_faculty_of_eligible_student,
     notify_hod_of_cert_request,
     notify_student_of_cert_decision,
@@ -62,10 +67,15 @@ from .services import (
     student_progress,
     update_progress,
 )
-from .tasks import embed_document_task, evaluate_submission_task, generate_questions_task
+from .tasks import embed_document_task, evaluate_submission_task, generate_questions_task, queue_index_embedding
 from .rag.chunking import extract_pdf_text
 from .rag.generate import LANGUAGE_NAMES as RAG_LANGUAGE_NAMES
-from .rag.retrieval import RetrievalError, upsert_document as rag_upsert_document
+from .rag.retrieval import (
+    RetrievalError,
+    ensure_corpus_indexed as rag_ensure_corpus_indexed,
+    stale_chunks as rag_stale_chunks,
+    upsert_document as rag_upsert_document,
+)
 from .points import BASE_POINTS, award_points, leaderboard_rows, student_rank
 from .hint_service import can_unlock_now as can_unlock_hint_now, generation_status, get_student_hints_for_question, generate_hint_for_submission, resolve_language, student_code_digest, unlock_hint_for_question
 
@@ -544,8 +554,10 @@ def dashboard(request):
         completed_total = sum(card["module_completed"] for card in module_cards)
         pct = (completed_total / questions_total * 100) if questions_total > 0 else 0
 
-    eligible, _ = certificate_eligible(request.user)
-    certificates = request.user.certificates.all()
+    cert_course = course_obj or certificate_course_for_student(request.user)
+    eligible, _ = certificate_eligible(request.user, cert_course)
+    course_certificate, certificate_request = certificate_state(request.user, cert_course)
+    certificates = request.user.certificates.select_related("course")
 
     user_rank = student_rank(request.user)
     recent_activity = Submission.objects.filter(student=request.user).select_related("question")[:10]
@@ -565,6 +577,9 @@ def dashboard(request):
             "completed_total": completed_total,
             "not_attempted_total": max(questions_total - completed_total, 0),
             "certificate_eligible": eligible,
+            "certificate_course": cert_course,
+            "course_certificate": course_certificate,
+            "certificate_request": certificate_request,
             "certificates": certificates,
             "user_rank": user_rank,
             "recent_activity": recent_activity,
@@ -572,11 +587,17 @@ def dashboard(request):
     )
 
 
+def is_dbms_module(module):
+    return "dbms" in (module.category or "").lower()
+
+
 @login_required
 def module_detail(request, module_id):
     module = get_object_or_404(Module, pk=module_id, is_active=True)
     if module.category in ["placement_training", "advanced_placement_training"]:
         return redirect("module_level_detail", module_id=module.id, difficulty="medium")
+    if is_dbms_module(module):
+        return redirect("module_level_detail", module_id=module.id, difficulty=ALL_DIFFICULTIES)
         
     record_attendance(request.user, module)
     level_cards = []
@@ -625,18 +646,19 @@ def module_detail(request, module_id):
 @login_required
 def module_level_detail(request, module_id, difficulty):
     module = get_object_or_404(Module, pk=module_id, is_active=True)
+    is_dbms = is_dbms_module(module)
+    if is_dbms and difficulty != ALL_DIFFICULTIES:
+        # DBMS modules have a single question list, not difficulty levels.
+        return redirect("module_level_detail", module_id=module.id, difficulty=ALL_DIFFICULTIES)
     valid_difficulties = {value for value, _ in Question.Difficulty.choices}
-    if difficulty not in valid_difficulties:
+    if not is_dbms and difficulty not in valid_difficulties:
         raise PermissionDenied
     record_attendance(request.user, module)
-    
-    # Check if this is a DBMS module
-    is_dbms_module = "dbms" in module.category.lower()
-    
+
     if request.user.is_faculty_like:
-        if is_dbms_module:
+        if is_dbms:
             # For faculty, show main questions with sub-question completion status
-            questions = list(module.questions.filter(is_active=True, difficulty=difficulty))
+            questions = list(module.questions.filter(is_active=True).order_by("csv_level", "id"))
             # For faculty view, we don't need assigned_slots in the same way
             assigned_slots = []
             current_slot = None
@@ -652,14 +674,17 @@ def module_level_detail(request, module_id, difficulty):
         else:
             assignment_count = 5
         assignment = get_or_create_module_assignment(request.user, module, difficulty, count=assignment_count)
+        if is_dbms:
+            # Per-level sets from before DBMS modules became a single list hold the same questions.
+            ModuleQuestionAssignment.objects.filter(student=request.user, module=module).exclude(pk=assignment.pk).delete()
         assigned_slots = sync_assignment_completion(assignment)
-        if is_dbms_module:
+        if is_dbms:
             # For DBMS modules, questions are the main questions from assigned slots
             questions = [slot.question for slot in assigned_slots]
         else:
             questions = [slot.question for slot in assigned_slots]
         current_slot = current_unlocked_question(assignment)
-        if is_dbms_module:
+        if is_dbms:
             # For DBMS modules, accepted_ids should be main questions where all sub-questions are completed
             accepted_ids = set()
             for slot in assigned_slots:
@@ -683,11 +708,11 @@ def module_level_detail(request, module_id, difficulty):
         else:
             accepted_ids = {slot.question_id for slot in assigned_slots if slot.completed_at}
     
-    difficulty_label = dict(Question.Difficulty.choices).get(difficulty, difficulty.title())
+    difficulty_label = "Questions" if is_dbms else dict(Question.Difficulty.choices).get(difficulty, difficulty.title())
     
     # Prepare sub-question completion data for DBMS modules
     subquestion_completion_data = {}
-    if is_dbms_module and not request.user.is_faculty_like:
+    if is_dbms and not request.user.is_faculty_like:
         from .models import SubQuestion
         for question in questions:
             subquestions = SubQuestion.objects.filter(main_question=question, is_active=True)
@@ -717,7 +742,7 @@ def module_level_detail(request, module_id, difficulty):
             "assigned_slots": assigned_slots,
             "current_slot": current_slot,
             "accepted_ids": accepted_ids,
-            "is_dbms_module": is_dbms_module,
+            "is_dbms_module": is_dbms,
             "subquestion_completion_data": subquestion_completion_data,
         },
     )
@@ -737,7 +762,8 @@ def question_detail(request, question_id):
                 return redirect("dashboard")
     
     if not request.user.is_faculty_like:
-        assignment = get_or_create_module_assignment(request.user, question.module, question.difficulty)
+        level = ALL_DIFFICULTIES if is_dbms_module(question.module) else question.difficulty
+        assignment = get_or_create_module_assignment(request.user, question.module, level)
         slot = assignment.assigned_questions.filter(question=question).first()
         if not slot:
             messages.error(request, "This question is not assigned to you.")
@@ -745,12 +771,12 @@ def question_detail(request, question_id):
     record_attendance(request.user, question.module)
     
     # Determine if we are dealing with a DBMS module and sub-question
-    is_dbms_module = "dbms" in question.module.category.lower()
+    is_dbms = is_dbms_module(question.module)
     subquestion = None
     subquestion_type = None
     display_question = question  # Default to main question for display
     
-    if is_dbms_module:
+    if is_dbms:
         # Get sub-question type from GET parameter, default to 'select'
         subquestion_type = request.GET.get('subtype', 'select').lower()
         # Validate subquestion_type
@@ -773,7 +799,7 @@ def question_detail(request, question_id):
     # For DBMS modules, we might want to filter by subquestion as well for the latest submission
     # But the latest submission is for the main question and subquestion combination.
     # We'll adjust the latest to be for the specific subquestion if we are in a DBMS context.
-    if is_dbms_module and subquestion:
+    if is_dbms and subquestion:
         latest = Submission.objects.filter(student=request.user, question=question, subquestion=subquestion).first()
     else:
         latest = Submission.objects.filter(student=request.user, question=question).first()
@@ -787,7 +813,7 @@ def question_detail(request, question_id):
         submission = form.save(commit=False)
         submission.student = request.user
         submission.question = question
-        if is_dbms_module and subquestion:
+        if is_dbms and subquestion:
             submission.subquestion = subquestion
         submission.language_id = effective_language_id(display_question, request.POST.get("language_id"))
         
@@ -805,7 +831,7 @@ def question_detail(request, question_id):
             "display_question": display_question,  # The question/sub-question being displayed
             "subquestion": subquestion,  # The current sub-question (if any)
             "subquestion_type": subquestion_type,  # The type of sub-question (if any)
-            "is_dbms_module": is_dbms_module,
+            "is_dbms_module": is_dbms,
             "form": form,
             "latest_submission": latest,
             "question_language": language_for_id(display_question.language_id),
@@ -1001,77 +1027,130 @@ def manual_accept_submission(request, submission_id):
     return redirect("submission_detail", submission.pk)
 
 
+PLACEMENT_CATEGORIES = ("placement_training", "advanced_placement_training")
+
+
+def course_offers_certificate(course):
+    """Placement training courses don't issue certificates; every other course does."""
+    return bool(course) and not course.modules.filter(category__in=PLACEMENT_CATEGORIES).exists()
+
+
+def _student_certificate_course(request):
+    """Course the student is asking about: ?course=, else the dashboard's course, else their semester's course."""
+    for course_id in (request.GET.get("course"), request.session.get("student_last_course")):
+        try:
+            course = Course.objects.filter(pk=int(course_id)).first()
+        except (TypeError, ValueError):
+            course = None
+        if course:
+            return course
+    return certificate_course_for_student(request.user)
+
+
+def certificate_state(student, course):
+    """(certificate, latest request) for a student's certificate in `course`."""
+    if not course:
+        return None, None
+    cert = Certificate.objects.filter(student=student, course=course).order_by("issued_at").first()
+    req = CertificateRequest.objects.filter(student=student, course=course).order_by("-updated_at", "-id").first()
+    return cert, req
+
+
 @login_required
 def certificate_create(request):
-    course_id = request.session.get("student_last_course")
-    if course_id:
-        course = get_object_or_404(Course, id=course_id)
-    else:
-        # Fallback to C programming if no course is selected
-        course = Course.objects.filter(slug='c-programming').first()
-        
-    if not course or course.slug in ["placement-training", "advanced-technical-placement-training"]:
+    """Student entry point: view an issued certificate, see the review status, or apply."""
+    if request.user.role != User.Role.STUDENT:
+        messages.info(request, "Certificates are requested by students from their dashboard.")
+        return redirect("dashboard")
+    course = _student_certificate_course(request)
+    if not course_offers_certificate(course):
         messages.error(request, "Certificates are not available for this course.")
         return redirect("dashboard")
 
-    is_eligible, pct = certificate_eligible(request.user, course)
-    if not is_eligible:
-        messages.error(request, "You are not yet eligible for a certificate. Complete the required modules (80% threshold & mandatory questions) first.")
-        return redirect("dashboard")
-
-    cert = Certificate.objects.filter(student=request.user, course=course).first()
-    approved_req = CertificateRequest.objects.filter(student=request.user, course=course, status=CertificateRequest.Status.APPROVED).first()
-
-    if cert or approved_req:
-        if not cert:
-            cert = generate_certificate(request.user, course)
+    cert, req = certificate_state(request.user, course)
+    if cert:
+        return redirect("certificate_detail", cert.pk)
+    if req and req.status == CertificateRequest.Status.APPROVED:
+        # Approved but the certificate wasn't stored (e.g. issuing failed): issue it now.
+        cert = issue_certificate(request.user, course, req.completion_percentage, req.requested_by_faculty)
         messages.success(request, "Your official certificate is ready!")
         return redirect("certificate_detail", cert.pk)
+    if req and req.status in (CertificateRequest.Status.PENDING_FACULTY, CertificateRequest.Status.PENDING_HOD):
+        return render(request, "certificates/under_review.html", {
+            "request_obj": req, "percentage": req.completion_percentage, "course": course,
+        })
 
-    req = CertificateRequest.objects.filter(student=request.user, course=course).order_by("-updated_at").first()
-    if req and req.status == CertificateRequest.Status.REJECTED:
+    is_eligible, pct = certificate_eligible(request.user, course)
+    if not is_eligible:
+        messages.error(
+            request,
+            f"You are not yet eligible for a certificate in {course.name}. Reach {settings.CERTIFICATE_THRESHOLD}% "
+            "completion and solve every mandatory question first.",
+        )
+        return redirect("dashboard")
+
+    is_reapplication = bool(req and req.status == CertificateRequest.Status.REJECTED)
+    if is_reapplication:
         has_new_work = Submission.objects.filter(
             student=request.user,
             question__module__course=course,
             status=Submission.Status.ACCEPTED,
-            submitted_at__gt=req.updated_at
+            submitted_at__gt=req.updated_at,
         ).exists()
         if not has_new_work:
             messages.error(request, f"Your previous certificate request was declined (Remarks: {req.hod_notes or 'No remarks provided'}). You must complete at least one new assignment and address feedback before reapplying.")
             return redirect("dashboard")
 
-        req = CertificateRequest.objects.create(
-            student=request.user,
-            course=course,
-            status=CertificateRequest.Status.PENDING_FACULTY,
-            completion_percentage=pct,
-        )
-        notify_faculty_of_eligible_student(request.user, course, is_reapplication=True)
-    elif not req:
-        req = CertificateRequest.objects.create(
-            student=request.user,
-            course=course,
-            status=CertificateRequest.Status.PENDING_FACULTY,
-            completion_percentage=pct,
-        )
-        notify_faculty_of_eligible_student(request.user, course, is_reapplication=False)
-
+    req = CertificateRequest.objects.create(
+        student=request.user,
+        course=course,
+        status=CertificateRequest.Status.PENDING_FACULTY,
+        completion_percentage=pct,
+    )
+    notify_faculty_of_eligible_student(request.user, course, is_reapplication=is_reapplication)
+    messages.success(request, "Certificate request submitted for faculty review.")
     return render(request, "certificates/under_review.html", {
-        "request_obj": req,
-        "percentage": pct,
+        "request_obj": req, "percentage": pct, "course": course,
     })
+
+
+def _certificate_for_viewer(request, certificate_id):
+    cert = get_object_or_404(Certificate.objects.select_related("student", "course"), pk=certificate_id)
+    if cert.student != request.user and not request.user.is_faculty_like:
+        raise PermissionDenied
+    return cert
+
+
+def _ensure_certificate_files(cert):
+    """Retry a QR/PDF that failed to render when the certificate was issued."""
+    if cert.pdf and cert.qr_code:
+        return cert
+    req = CertificateRequest.objects.filter(
+        student=cert.student, course=cert.course, status=CertificateRequest.Status.APPROVED
+    ).order_by("-updated_at").first()
+    return issue_certificate(cert.student, cert.course, cert.completion_percentage,
+                             req.requested_by_faculty if req else None)
 
 
 @login_required
 def certificate_detail(request, certificate_id):
-    cert = get_object_or_404(Certificate, pk=certificate_id)
-    if cert.student != request.user and not request.user.is_faculty_like:
-        raise PermissionDenied
+    cert = _ensure_certificate_files(_certificate_for_viewer(request, certificate_id))
     return render(request, "certificates/detail.html", {"certificate": cert})
 
 
+@login_required
+def certificate_download(request, certificate_id):
+    cert = _ensure_certificate_files(_certificate_for_viewer(request, certificate_id))
+    if not cert.pdf:
+        messages.error(request, "The certificate PDF could not be generated. Please try again later.")
+        return redirect("certificate_detail", cert.pk)
+    filename = f"{slugify(cert.student.usn or cert.student.username)}_{cert.course.slug}_certificate.pdf"
+    return FileResponse(cert.pdf.open("rb"), as_attachment=request.GET.get("inline") != "1",
+                        filename=filename, content_type="application/pdf")
+
+
 def certificate_verify(request, verification_hash):
-    cert = get_object_or_404(Certificate.objects.select_related("student"), verification_hash=verification_hash)
+    cert = get_object_or_404(Certificate.objects.select_related("student", "course"), verification_hash=verification_hash)
     return render(request, "certificates/verify.html", {"certificate": cert})
 
 
@@ -1375,9 +1454,13 @@ def faculty_question_bank(request, module_id=None):
             .annotate(test_count=Count("test_cases"))
             .order_by("difficulty", "csv_level", "title")
         )
-        for diff_value, diff_label in Question.Difficulty.choices:
-            qs = [q for q in all_questions if q.difficulty == diff_value]
-            questions_by_difficulty[diff_label] = qs
+        if is_dbms_module(selected_module):
+            # DBMS modules have no difficulty levels: one list, in level order.
+            questions_by_difficulty["Questions"] = sorted(all_questions, key=lambda q: (q.csv_level, q.id))
+        else:
+            for diff_value, diff_label in Question.Difficulty.choices:
+                qs = [q for q in all_questions if q.difficulty == diff_value]
+                questions_by_difficulty[diff_label] = qs
 
         stats = {
             "total": len(all_questions),
@@ -1394,6 +1477,7 @@ def faculty_question_bank(request, module_id=None):
             "modules": modules,
             "selected_module": selected_module,
             "questions_by_difficulty": questions_by_difficulty,
+            "flat_list": bool(selected_module and is_dbms_module(selected_module)),
             "stats": stats,
         },
     )
@@ -2039,41 +2123,83 @@ def faculty_question_upload(request):
     return render(request, "faculty/question_upload.html", {"form": form, "results": results})
 
 
+def _sync_sample_test(question):
+    """Keep sample test #1 equal to the question's sample input/output."""
+    if not question.sample_output:
+        return
+    sample = question.test_cases.filter(is_sample=True).order_by("order", "id").first()
+    if sample:
+        if sample.stdin != question.sample_input or sample.expected_output != question.sample_output:
+            sample.stdin, sample.expected_output = question.sample_input, question.sample_output
+            sample.save(update_fields=["stdin", "expected_output"])
+    else:
+        TestCase.objects.create(question=question, is_sample=True, order=1,
+                                stdin=question.sample_input, expected_output=question.sample_output)
+
+
+def _sync_question_sample(question, test):
+    """Editing the first sample test updates the sample shown on the question."""
+    first = question.test_cases.filter(is_sample=True).order_by("order", "id").first()
+    if first and first.pk == test.pk:
+        question.sample_input, question.sample_output = test.stdin, test.expected_output
+        question.save(update_fields=["sample_input", "sample_output"])
+
+
 @login_required
 def faculty_question_form(request, question_id=None):
     faculty_required(request.user)
-    question = get_object_or_404(Question, pk=question_id) if question_id else None
-    is_test_post = request.method == "POST" and request.POST.get("action") == "add_test"
-    question_data = request.POST if request.method == "POST" and not is_test_post else None
-    test_data = request.POST if is_test_post else None
-    form = QuestionForm(question_data, instance=question)
-    test_form = QuickTestCaseForm(test_data, initial={"order": 2})
+    question = get_object_or_404(Question.objects.select_related("module"), pk=question_id) if question_id else None
+    action = request.POST.get("action") if request.method == "POST" else None
+    test_actions = {"add_test", "edit_test", "delete_test"}
+    form = QuestionForm(request.POST if action not in test_actions and request.method == "POST" else None, instance=question)
+    test_form = QuickTestCaseForm(request.POST if action == "add_test" else None,
+                                  initial={"order": (question.test_cases.count() + 1) if question else 2})
+    edit_errors = {}
 
-    if is_test_post:
+    if action in test_actions:
         if not question:
-            messages.error(request, "Save the question before adding hidden tests.")
+            messages.error(request, "Save the question before adding tests.")
             return redirect("faculty_question_new")
-        if test_form.is_valid():
+        if action == "add_test" and test_form.is_valid():
             test = test_form.save(commit=False)
             test.question = question
             test.save()
+            _sync_question_sample(question, test)
             messages.success(request, "Test case added.")
             return redirect("faculty_question_edit", question.pk)
-    elif request.method == "POST" and form.is_valid():
-        obj = form.save(commit=False)
-        if not obj.created_by_id:
-            obj.created_by = request.user
-        obj.save()
-        if obj.sample_output:
-            TestCase.objects.update_or_create(
-                question=obj,
-                is_sample=True,
-                order=1,
-                defaults={"stdin": obj.sample_input, "expected_output": obj.sample_output},
-            )
-        messages.success(request, "Question saved.")
-        return redirect("faculty_question_edit", obj.pk)
-    tests = question.test_cases.all() if question else []
+        if action in ("edit_test", "delete_test"):
+            test = get_object_or_404(TestCase, pk=request.POST.get("test_id"), question=question)
+            if action == "delete_test":
+                was_first_sample = question.test_cases.filter(is_sample=True).order_by("order", "id").first() == test
+                test.delete()
+                if was_first_sample:
+                    nxt = question.test_cases.filter(is_sample=True).order_by("order", "id").first()
+                    question.sample_input = nxt.stdin if nxt else ""
+                    question.sample_output = nxt.expected_output if nxt else ""
+                    question.save(update_fields=["sample_input", "sample_output"])
+                messages.success(request, "Test case deleted.")
+                return redirect("faculty_question_edit", question.pk)
+            edit_form = QuickTestCaseForm(request.POST, instance=test)
+            if edit_form.is_valid():
+                edit_form.save()
+                _sync_question_sample(question, test)
+                messages.success(request, f"Test case #{test.order} updated.")
+                return redirect("faculty_question_edit", question.pk)
+            edit_errors[test.pk] = edit_form.errors
+            messages.error(request, "The test case was not saved; fix the highlighted fields.")
+    elif request.method == "POST":
+        if form.is_valid():
+            obj = form.save(commit=False)
+            if not obj.created_by_id:
+                obj.created_by = request.user
+            obj.save()
+            _sync_sample_test(obj)
+            messages.success(request, "Question saved.")
+            return redirect("faculty_question_edit", obj.pk)
+        messages.error(request, "The question was not saved; fix the highlighted fields.")
+    tests = list(question.test_cases.all()) if question else []
+    for test in tests:
+        test.edit_errors = edit_errors.get(test.pk)
     return render(
         request,
         "faculty/question_form.html",
@@ -2085,12 +2211,25 @@ def faculty_question_form(request, question_id=None):
 def faculty_student_detail(request, student_id):
     """Faculty view showing a specific student's full dashboard."""
     faculty_required(request.user)
-    student = get_object_or_404(User, pk=student_id)
-    
+    student = get_object_or_404(User, pk=student_id, role=User.Role.STUDENT)
+
     progress_rows = student_progress(student)
-    from core.services import _student_primary_category
-    category = _student_primary_category(student)
-    modules = Module.objects.filter(is_active=True, category=category).prefetch_related("questions")
+    # Show the course the student applied for, else the course of their semester.
+    existing_request = (
+        CertificateRequest.objects.filter(student=student).select_related("course", "requested_by_faculty")
+        .order_by(
+            # pending requests first, newest first
+            Case(When(status=CertificateRequest.Status.PENDING_FACULTY, then=0), default=1),
+            "-updated_at",
+        ).first()
+    )
+    cert_course = (existing_request.course if existing_request and existing_request.course
+                   else certificate_course_for_student(student))
+    if cert_course:
+        modules = Module.objects.filter(is_active=True, course=cert_course).prefetch_related("questions")
+    else:
+        from core.services import _student_primary_category
+        modules = Module.objects.filter(is_active=True, category=_student_primary_category(student)).prefetch_related("questions")
     progress_by_module = {row.module_id: row for row in progress_rows}
     user_submissions = Submission.objects.filter(student=student).values("question_id", "status")
     question_status_map = {}
@@ -2111,7 +2250,7 @@ def faculty_student_detail(request, student_id):
     for module in modules:
         progress = progress_by_module.get(module.id)
         module_questions = module.questions.filter(is_active=True)
-        module_total = min(15, module_questions.count())
+        module_total = module_question_quota(module, module_questions.count())
         assigned_qs = AssignedQuestion.objects.filter(
             assignment__student=student, assignment__module=module
         )
@@ -2187,11 +2326,11 @@ def faculty_student_detail(request, student_id):
             }
         )
 
-    pct = overall_percentage(student)
+    pct = overall_percentage(student, cert_course)
     questions_total = sum(card["module_total"] for card in module_cards)
     completed_total = sum(card["module_completed"] for card in module_cards)
-    eligible, _ = certificate_eligible(student)
-    certificates = student.certificates.all()
+    eligible, _ = certificate_eligible(student, cert_course)
+    certificates = student.certificates.select_related("course")
 
     user_rank = student_rank(student)
 
@@ -2212,7 +2351,8 @@ def faculty_student_detail(request, student_id):
             "certificates": certificates,
             "user_rank": user_rank,
             "recent_activity": recent_activity,
-            "existing_request": CertificateRequest.objects.filter(student=student).order_by("-updated_at").first(),
+            "existing_request": existing_request,
+            "certificate_course": cert_course,
         },
     )
 
@@ -2251,27 +2391,53 @@ def role_select(request):
 # =========================================================
 #   HoD Dashboard
 # =========================================================
+def _enter_hod_portal(request):
+    """HoD pages are for HoD users only; opening one (e.g. from a notification) switches the session to the HoD role."""
+    if request.user.role != User.Role.HOD:
+        return False
+    request.session["active_role"] = "hod"
+    return True
+
+
+def course_module_progress(student, course):
+    """Per-module solved/total rows for `course` (or the student's primary category), with the dashboard's caps."""
+    if course:
+        modules = Module.objects.filter(is_active=True, course=course)
+    else:
+        from core.services import _student_primary_category
+        modules = Module.objects.filter(is_active=True, category=_student_primary_category(student))
+    rows = []
+    for module in modules.order_by("order", "name"):
+        total = module_question_quota(module, module.questions.filter(is_active=True).count())
+        solved = min(total, solved_in_module(student, module))
+        rows.append({"module": module, "total": total, "solved": solved,
+                     "percentage": (solved / total * 100) if total else 0})
+    return rows
+
+
 @login_required
 def hod_dashboard(request):
-    if request.user.role != User.Role.HOD or request.session.get("active_role") != "hod":
+    if not _enter_hod_portal(request):
         return redirect("dashboard")
 
     pending_requests = CertificateRequest.objects.filter(
         status=CertificateRequest.Status.PENDING_HOD
-    ).select_related("student", "requested_by_faculty").order_by("-updated_at")
+    ).select_related("student", "course", "requested_by_faculty").order_by("-updated_at")
 
     approved_count = CertificateRequest.objects.filter(status=CertificateRequest.Status.APPROVED).count()
     rejected_count = CertificateRequest.objects.filter(status=CertificateRequest.Status.REJECTED).count()
+    awaiting_faculty_count = CertificateRequest.objects.filter(status=CertificateRequest.Status.PENDING_FACULTY).count()
     total_students = User.objects.filter(role=User.Role.STUDENT).count()
 
     recent_decisions = CertificateRequest.objects.filter(
         status__in=[CertificateRequest.Status.APPROVED, CertificateRequest.Status.REJECTED]
-    ).select_related("student", "requested_by_faculty", "approved_by_hod").order_by("-updated_at")[:10]
+    ).select_related("student", "course", "requested_by_faculty", "approved_by_hod").order_by("-updated_at")[:10]
 
     return render(request, "hod/dashboard.html", {
         "pending_requests": pending_requests,
         "approved_count": approved_count,
         "rejected_count": rejected_count,
+        "awaiting_faculty_count": awaiting_faculty_count,
         "total_students": total_students,
         "recent_decisions": recent_decisions,
     })
@@ -2282,48 +2448,36 @@ def hod_dashboard(request):
 # =========================================================
 @login_required
 def hod_review_request(request, request_id):
-    if request.user.role != User.Role.HOD or request.session.get("active_role") != "hod":
+    if not _enter_hod_portal(request):
         return redirect("dashboard")
 
     cert_req = get_object_or_404(
-        CertificateRequest.objects.select_related("student", "requested_by_faculty"),
+        CertificateRequest.objects.select_related("student", "course", "requested_by_faculty", "approved_by_hod"),
         pk=request_id,
     )
     student = cert_req.student
+    course = cert_req.course
 
-    # Get full student activity
-    from core.services import _student_primary_category
-    category = _student_primary_category(student)
-    modules = Module.objects.filter(is_active=True, category=category).prefetch_related("questions")
-    module_progress = []
-    for module in modules:
-        total_q = min(15, module.questions.filter(is_active=True).count())
-        solved = module.questions.filter(
-            is_active=True,
-            submissions__student=student,
-            submissions__status=Submission.Status.ACCEPTED,
-        ).distinct().count()
-        solved = min(solved, total_q)
-        pct = (solved / total_q * 100) if total_q else 0
-        module_progress.append({
-            "module": module,
-            "total": total_q,
-            "solved": solved,
-            "percentage": pct,
-        })
+    module_progress = course_module_progress(student, course)
+    submissions = Submission.objects.filter(student=student)
+    if course:
+        submissions = submissions.filter(question__module__course=course)
+    recent_submissions = submissions.select_related("question", "question__module").order_by("-submitted_at")[:30]
 
-    recent_submissions = Submission.objects.filter(
-        student=student
-    ).select_related("question", "question__module").order_by("-submitted_at")[:30]
-
-    pct = overall_percentage(student)
+    eligible, pct = certificate_eligible(student, course)
+    issued = Certificate.objects.filter(student=student, course=course).first() if course else None
 
     return render(request, "hod/review_request.html", {
         "cert_req": cert_req,
         "student": student,
+        "course": course,
         "module_progress": module_progress,
         "recent_submissions": recent_submissions,
         "overall_pct": pct,
+        "currently_eligible": eligible,
+        "certificate": issued,
+        "previous_requests": CertificateRequest.objects.filter(student=student, course=course)
+        .exclude(pk=cert_req.pk).select_related("approved_by_hod").order_by("-updated_at")[:5],
     })
 
 
@@ -2333,38 +2487,47 @@ def hod_review_request(request, request_id):
 @login_required
 @require_POST
 def hod_approve_certificate(request, request_id):
-    if request.user.role != User.Role.HOD or request.session.get("active_role") != "hod":
+    if not _enter_hod_portal(request):
         raise PermissionDenied
 
-    cert_req = get_object_or_404(CertificateRequest, pk=request_id)
-    if cert_req.status != CertificateRequest.Status.PENDING_HOD:
-        messages.info(request, "This certificate request has already been processed.")
-        return redirect("hod_dashboard")
     action = request.POST.get("action")
     notes = request.POST.get("notes", "").strip()
+    if action not in ("approve", "reject"):
+        messages.error(request, "Choose to approve or decline the request.")
+        return redirect("hod_review_request", request_id)
 
-    if action == "approve":
-        try:
-            cert_req.status = CertificateRequest.Status.APPROVED
-            cert_req.approved_by_hod = request.user
-            cert_req.hod_notes = notes
-            cert_req.save()
-            # Auto-generate the certificate
-            cert = generate_certificate(cert_req.student, cert_req.course)
-            notify_student_of_cert_decision(cert_req)
-            messages.success(request, f"The certificate for {cert_req.student.display_name} has been approved!")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise e
-    elif action == "reject":
-        cert_req.status = CertificateRequest.Status.REJECTED
+    with transaction.atomic():
+        cert_req = get_object_or_404(
+            CertificateRequest.objects.select_for_update().select_related("student", "course", "requested_by_faculty"),
+            pk=request_id,
+        )
+        if cert_req.status != CertificateRequest.Status.PENDING_HOD:
+            messages.info(request, "This certificate request has already been processed.")
+            return redirect("hod_dashboard")
+        if action == "approve" and not cert_req.course:
+            messages.error(request, "This request isn't linked to a course, so no certificate can be issued. Decline it and ask the student to apply again from their course dashboard.")
+            return redirect("hod_review_request", cert_req.pk)
+        if action == "reject" and not notes:
+            messages.error(request, "Add remarks when declining so the student knows what to fix.")
+            return redirect("hod_review_request", cert_req.pk)
+
         cert_req.approved_by_hod = request.user
         cert_req.hod_notes = notes
-        cert_req.save()
-        notify_student_of_cert_decision(cert_req)
-        messages.info(request, f"Certificate request rejected for {cert_req.student.display_name}.")
+        if action == "approve":
+            cert_req.status = CertificateRequest.Status.APPROVED
+            cert_req.save()
+            # The HoD's decision is final: issue even if the percentage moved since the request.
+            issue_certificate(cert_req.student, cert_req.course, cert_req.completion_percentage,
+                              cert_req.requested_by_faculty)
+        else:
+            cert_req.status = CertificateRequest.Status.REJECTED
+            cert_req.save()
 
+    notify_student_of_cert_decision(cert_req)
+    if action == "approve":
+        messages.success(request, f"The certificate for {cert_req.student.display_name} has been approved and issued.")
+    else:
+        messages.info(request, f"Certificate request declined for {cert_req.student.display_name}.")
     return redirect("hod_dashboard")
 
 
@@ -2375,28 +2538,40 @@ def hod_approve_certificate(request, request_id):
 def faculty_cert_requests(request):
     faculty_required(request.user)
 
-    # Find students who have applied for certificate verification
+    # Students who have applied for certificate verification, for this faculty's courses first.
     pending_reqs = CertificateRequest.objects.filter(
         status=CertificateRequest.Status.PENDING_FACULTY
-    ).select_related("student").order_by("-updated_at")
+    ).select_related("student", "course").order_by("-updated_at")
+    managed = request.user.managed_courses.all()
+    if managed.exists():
+        pending_reqs = pending_reqs.filter(Q(course__in=managed) | Q(course__isnull=True))
     eligible_students = []
     for req in pending_reqs:
-        _, pct = certificate_eligible(req.student)
+        eligible, pct = certificate_eligible(req.student, req.course)
         eligible_students.append({
             "student": req.student,
+            "course": req.course,
             "percentage": pct,
+            "currently_eligible": eligible,
             "existing_request": req,
         })
 
     # Requests that this faculty has sent
     my_requests = CertificateRequest.objects.filter(
         requested_by_faculty=request.user
-    ).select_related("student", "approved_by_hod").order_by("-updated_at")[:20]
+    ).select_related("student", "course", "approved_by_hod").order_by("-updated_at")[:20]
 
     return render(request, "faculty/cert_requests.html", {
         "eligible_students": eligible_students,
         "my_requests": my_requests,
     })
+
+
+def _redirect_back(request, fallback, *args):
+    referer = request.META.get("HTTP_REFERER")
+    if referer and url_has_allowed_host_and_scheme(referer, allowed_hosts={request.get_host()}):
+        return redirect(referer)
+    return redirect(fallback, *args)
 
 
 # =========================================================
@@ -2408,52 +2583,38 @@ def faculty_send_cert_request(request, student_id):
     faculty_required(request.user)
 
     student = get_object_or_404(User, pk=student_id, role=User.Role.STUDENT)
-    is_eligible, pct = certificate_eligible(student)
-    if not is_eligible:
-        messages.error(request, f"{student.display_name} is not yet eligible for a certificate.")
-        return redirect("faculty_cert_requests")
+    pending = CertificateRequest.objects.filter(student=student, status=CertificateRequest.Status.PENDING_FACULTY)
+    request_id = request.POST.get("request_id")
+    if request_id:
+        cert_req = pending.filter(pk=request_id if str(request_id).isdigit() else None).first()
+    else:
+        cert_req = pending.order_by("-updated_at").first()
+    if not cert_req:
+        messages.error(request, f"{student.display_name} has no certificate request awaiting faculty review. Students apply from their course dashboard.")
+        return _redirect_back(request, "faculty_cert_requests")
 
-    # Check for existing pending request
+    is_eligible, pct = certificate_eligible(student, cert_req.course)
+    if not is_eligible:
+        messages.error(request, f"{student.display_name} is no longer eligible ({pct:.1f}% complete or a mandatory question is unsolved).")
+        return _redirect_back(request, "faculty_cert_requests")
+
     existing = CertificateRequest.objects.filter(
         student=student,
+        course=cert_req.course,
         status__in=[CertificateRequest.Status.PENDING_HOD, CertificateRequest.Status.APPROVED],
-    ).first()
+    ).exclude(pk=cert_req.pk).first()
     if existing:
         messages.warning(request, f"A request for {student.display_name} already exists ({existing.get_status_display()}).")
-        return redirect("faculty_cert_requests")
+        return _redirect_back(request, "faculty_cert_requests")
 
-    # Update existing PENDING_FACULTY request if it exists, otherwise create new
-    cert_req = CertificateRequest.objects.filter(student=student, status=CertificateRequest.Status.PENDING_FACULTY).order_by('-updated_at').first()
-    notes = request.POST.get("notes", "").strip()
-    
-    if cert_req:
-        cert_req.status = CertificateRequest.Status.PENDING_HOD
-        cert_req.requested_by_faculty = request.user
-        cert_req.faculty_notes = notes
-        cert_req.completion_percentage = pct
-        cert_req.save()
-    else:
-        # Infer course if not exists
-        from .services import _student_primary_category
-        cat = _student_primary_category(student)
-        slug = cat.replace('_', '-') # basic fallback
-        if cat == "placement_training": slug = "technical-placement-training"
-        elif cat == "advanced_placement_training": slug = "advanced-technical-placement-training"
-        elif cat == "cpp_programming": slug = "c-programming-advanced"
-        
-        course = Course.objects.filter(slug__icontains=slug).first()
-        
-        cert_req = CertificateRequest.objects.create(
-            student=student,
-            course=course,
-            requested_by_faculty=request.user,
-            status=CertificateRequest.Status.PENDING_HOD,
-            faculty_notes=notes,
-            completion_percentage=pct,
-        )
+    cert_req.status = CertificateRequest.Status.PENDING_HOD
+    cert_req.requested_by_faculty = request.user
+    cert_req.faculty_notes = request.POST.get("notes", "").strip()
+    cert_req.completion_percentage = pct
+    cert_req.save()
     notify_hod_of_cert_request(cert_req)
     messages.success(request, f"Approval request sent to HoD for {student.display_name}.")
-    return redirect("faculty_cert_requests")
+    return _redirect_back(request, "faculty_cert_requests")
 
 
 # =========================================================
@@ -3176,6 +3337,13 @@ def faculty_agent_topics_api(request):
             "course__name": m.course.name if m.course else "",
             "language": module_generation_language(m),  # None: generation not supported (e.g. SQL)
         })
+    # First use: load the bundled DSA notes and embed them in the background so
+    # retrieval is ready (and semantic) by the time the faculty member generates.
+    try:
+        if rag_ensure_corpus_indexed() or rag_stale_chunks().exists():
+            queue_index_embedding()
+    except Exception:
+        logger.exception("Could not prepare the RAG index")
     topics = sorted(
         {t.title() for t in RagDocument.objects.filter(source=RagDocument.Source.CORPUS).values_list("topic", flat=True) if t}
     ) or (  # index not built yet: list the bundled corpus folders

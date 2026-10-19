@@ -14,9 +14,24 @@ class User(AbstractUser):
         HOD = "hod", "HoD"
         ADMIN = "admin", "Admin"
 
+    class Branch(models.TextChoices):
+        CSE = "CSE", "Computer Science & Engineering"
+        CCE = "CCE", "Computer & Communication Engineering"
+        ISE = "ISE", "Information Science & Engineering"
+        AIML = "AIML", "Artificial Intelligence & Machine Learning"
+        AIDS = "AIDS", "Artificial Intelligence & Data Science"
+        CSE_CS = "CSE-CS", "Computer Science & Engineering (Cyber Security)"
+        ECE = "ECE", "Electronics & Communication Engineering"
+        EVL = "EVL", "Electronics Engineering (VLSI Design & Technology)"
+        EEE = "EEE", "Electrical & Electronics Engineering"
+        RAI = "RAI", "Robotics & Artificial Intelligence"
+        ME = "ME", "Mechanical Engineering"
+        CV = "CV", "Civil Engineering"
+        BT = "BT", "Biotechnology"
+
     usn = models.CharField(max_length=32, blank=True, unique=True, null=True)
     role = models.CharField(max_length=16, choices=Role.choices, default=Role.STUDENT)
-    department = models.CharField(max_length=80, blank=True)
+    department = models.CharField("Branch", max_length=80, blank=True, choices=Branch.choices)
     semester = models.PositiveSmallIntegerField(default=1)
     year = models.PositiveSmallIntegerField(
         default=1,
@@ -383,6 +398,9 @@ class Notification(models.Model):
                 if req:
                     return reverse("hod_review_request", args=[req.id])
             return reverse("hod_dashboard")
+        elif self.notification_type == self.Type.CERT_HOD_APPROVED and self.recipient_id == self.related_student_id:
+            cert = Certificate.objects.filter(student_id=self.recipient_id).order_by("-issued_at").first()
+            return reverse("certificate_detail", args=[cert.id]) if cert else reverse("dashboard")
         elif self.notification_type in [self.Type.CERT_HOD_APPROVED, self.Type.CERT_HOD_REJECTED]:
             return reverse("dashboard")
         return reverse("notifications_list")
@@ -420,7 +438,7 @@ class Notification(models.Model):
 
         elif self.recipient.role == "student":
             if req.status == CertificateRequest.Status.APPROVED:
-                cert = Certificate.objects.filter(student=self.related_student).first()
+                cert = Certificate.objects.filter(student=self.related_student, course=req.course).first()
                 url = reverse("certificate_detail", args=[cert.id]) if cert else reverse("certificate_create")
                 return {"label": "📥 View Diploma ↗", "open": True, "url": url}
             elif req.status == CertificateRequest.Status.REJECTED:
