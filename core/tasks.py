@@ -90,6 +90,8 @@ def generate_llm_hint_task(question_id, tier=None):
 @app.task(soft_time_limit=3600, time_limit=3660)
 def generate_questions_task(job_id):
     """Run an LLM question-generation job (T7) on the CPU 'llm' queue."""
+    import time
+
     from django.utils import timezone
 
     from .models import GenerationJob
@@ -114,6 +116,7 @@ def generate_questions_task(job_id):
             custom_prompt=p.get("prompt", ""),
             document_ids=p.get("document_ids") or None,
             progress=progress,
+            deadline=time.monotonic() + generate.JOB_TIME_BUDGET,
         )
         job.result = result
         job.status = GenerationJob.Status.DONE

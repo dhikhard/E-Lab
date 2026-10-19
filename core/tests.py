@@ -312,20 +312,6 @@ class DiagnosticHintGroundingTests(TestCase):
         self.assertIn("Your first failing test", hint)
 
 
-class RagAgentStarterCodeTests(TestCase):
-    def test_starter_code_is_python_not_c(self):
-        from .rag_agent import RAGQuestionAgent
-        agent = RAGQuestionAgent()
-        starter = agent._adapt_starter_code("", "easy")
-        self.assertIn("def solve", starter)
-        self.assertNotIn("#include", starter)
-
-    def test_clean_tc_value_is_callable_on_instance(self):
-        from .rag_agent import RAGQuestionAgent
-        agent = RAGQuestionAgent()
-        self.assertEqual(agent._clean_tc_value("```\n5\n```"), "5")
-
-
 class DbmsProgressTests(TestCase):
     def test_progress_can_reach_100_percent(self):
         from .models import Course, Module, Question, SubQuestion, Submission

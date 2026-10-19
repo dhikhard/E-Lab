@@ -276,6 +276,46 @@ class GenerationPipelineTests(TestCase):
         self.assertEqual(generate.difficulty_plan("mixed", 3), ["easy", "medium", "hard"])
         self.assertEqual(generate.difficulty_plan("hard", 2), ["hard", "hard"])
 
+    def test_time_budget_stops_cleanly_and_keeps_accepted(self, _e):
+        clock = [1000.0]
+
+        def fake(messages):
+            clock[0] += 400  # each CPU generation takes a while
+            return (json.dumps(good_candidate(self.ref, title=f"Bracket Checker {clock[0]:.0f}")), {})
+
+        from types import SimpleNamespace
+        with patch("core.rag.generate.time", SimpleNamespace(monotonic=lambda: clock[0])), \
+                patch("core.rag.generate.GEN_TIMEOUT", 600), \
+                patch("core.rag.generate._call_model", side_effect=fake), \
+                patch("core.rag.generate.check_duplicate", return_value=[0.0]):
+            result = generate.generate_questions("stack", difficulty="easy", language="python", count=3,
+                                                 runner=python_runner, deadline=1700.0)
+        # Call 1 starts at 1000 (+600 fits by 1700); call 2 would start at 1400 and could run past it.
+        self.assertEqual(len(result["accepted"]), 1)
+        self.assertEqual(result["rejected"][-1]["stage"], "time")
+
+    def test_unexpected_error_keeps_accepted_questions(self, _e):
+        calls = []
+
+        def runner(*args, **kwargs):
+            calls.append(1)
+            if len(calls) > 6:  # first question's 5 tests + starter compile succeed
+                raise OSError("docker went away")
+            return python_runner(*args, **kwargs)
+
+        cands = [good_candidate(self.ref), good_candidate(self.ref, title="Second Bracket Task")]
+        with patch("core.rag.generate._call_model", side_effect=[(json.dumps(c), {}) for c in cands]), \
+                patch("core.rag.generate.check_duplicate", return_value=[0.0]):
+            result = generate.generate_questions("stack", difficulty="easy", language="python", count=2, runner=runner)
+        self.assertEqual(len(result["accepted"]), 1)
+        self.assertEqual(result["rejected"][-1]["stage"], "internal")
+
+    def test_citations_must_be_a_list(self, _e):
+        cand = good_candidate(self.ref)
+        cand["citations"] = self.ref
+        result = self.run_pipeline([cand, cand])
+        self.assertEqual(result["rejected"][0]["stage"], "schema")
+
     def test_model_down_is_reported_not_raised(self, _e):
         import requests
         with patch("core.rag.generate._call_model", side_effect=requests.ConnectionError("down")):
@@ -343,10 +383,29 @@ class AgentApiTests(TestCase):
         r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack"}), content_type="application/json")
         self.assertEqual(r.status_code, 403)
 
-    def test_legacy_add_path_saves_inactive(self):
+    def test_only_llm_job_questions_can_be_saved(self):
         r = self.client.post("/api/faculty-agent/add-question/", data=json.dumps(
             {"module_id": self.module.pk, "title": "T", "description": "D"}), content_type="application/json")
-        self.assertFalse(Question.objects.get(pk=r.json()["question_id"]).is_active)
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(Question.objects.exists())
+
+    @patch("core.views.generate_questions_task.delay")
+    def test_stale_job_does_not_block_new_generation(self, delay):
+        import datetime
+        from django.utils import timezone
+        stuck = GenerationJob.objects.create(created_by=self.fac, status=GenerationJob.Status.RUNNING,
+                                             started_at=timezone.now() - datetime.timedelta(hours=3))
+        r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack", "language": "python"}),
+                             content_type="application/json")
+        self.assertEqual(r.status_code, 202)
+        stuck.refresh_from_db()
+        self.assertEqual(stuck.status, GenerationJob.Status.FAILED)
+        fresh = GenerationJob.objects.create(created_by=self.fac, status=GenerationJob.Status.RUNNING, started_at=timezone.now())
+        self.assertEqual(self.client.get(f"/api/faculty-agent/jobs/{fresh.pk}/").json()["status"], "running")
+
+    def test_topics_listed_without_index(self):
+        topics = self.client.get("/api/faculty-agent/topics/").json()["topics"]
+        self.assertTrue(topics)  # bundled corpus folders, no template generator involved
 
     @patch("core.views.embed_document_task.delay")
     def test_upload_markdown_creates_document(self, delay):

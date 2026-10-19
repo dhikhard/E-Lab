@@ -37,6 +37,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://elab-ollama:11434/api/chat")
 GEN_MODEL = os.environ.get("QUESTION_GEN_MODEL", os.environ.get("HINT_MODEL", "qwen3.5:4b"))
 GEN_TIMEOUT = int(os.environ.get("QUESTION_GEN_TIMEOUT", "600"))
 GEN_ATTEMPTS = 2
+JOB_TIME_BUDGET = 3600 - 300  # generate_questions_task soft limit minus room for sandbox runs and saving
 DUPLICATE_THRESHOLD = 0.92
 MAX_COPIED_FRACTION = 0.35  # share of the statement copied verbatim (20+ char runs) from one source
 LANGUAGE_NAMES = {"c": "C (C11, gcc)", "cpp": "C++17 (g++)", "python": "Python 3", "java": "Java 17"}
@@ -193,6 +194,8 @@ def parse_candidate(raw, language):
         raise GenerationRejected("schema", "duplicate test inputs", "Make every test input different.")
     if not isinstance(q["constraints"], list) or not all(isinstance(c, str) for c in q["constraints"]):
         raise GenerationRejected("schema", "constraints must be a list of strings")
+    if not isinstance(q["citations"], list) or not all(isinstance(c, str) for c in q["citations"]):
+        raise GenerationRejected("schema", "citations must be a list of source ids", "Give 'citations' as a list of source ids.")
     q["language"] = language
     return q
 
@@ -384,10 +387,15 @@ def difficulty_plan(difficulty, count):
 
 
 def generate_questions(topic, difficulty="mixed", language="python", count=3, custom_prompt="",
-                       document_ids=None, progress=None, runner=run_code):
+                       document_ids=None, progress=None, runner=run_code, deadline=None):
     """
     Returns {"accepted": [...], "rejected": [...], "sources": [...], "timings": {...}}.
     Raises retrieval.RetrievalError if no source material is available.
+
+    `deadline` (time.monotonic() value): no model call is started unless a
+    full GEN_TIMEOUT still fits before it, so a job stops cleanly with the
+    questions accepted so far instead of being killed by the task time limit
+    (which would lose them all).
     """
     started = time.monotonic()
     query = f"{topic} {custom_prompt}".strip()
@@ -396,14 +404,22 @@ def generate_questions(topic, difficulty="mixed", language="python", count=3, cu
     existing = existing_question_vectors()
     accepted, rejected, accepted_vectors = [], [], []
     plan = difficulty_plan(difficulty, count)
+    out_of_time = False
 
     for n, target in enumerate(plan, 1):
+        if out_of_time:
+            break
         messages = build_messages(chunks, topic, target, language, custom_prompt)
         if accepted:
             messages[-1]["content"] += "\nAlready written in this batch (write something different): " + \
                 "; ".join(a["title"] for a in accepted)
         base_messages = list(messages)
         for attempt in range(1, GEN_ATTEMPTS + 1):
+            if deadline is not None and time.monotonic() + GEN_TIMEOUT > deadline:
+                out_of_time = True
+                rejected.append({"target": target, "attempt": attempt, "stage": "time",
+                                 "detail": "stopped early: the job's time budget is used up; generate the rest in a new job"})
+                break
             if progress:
                 progress(f"Question {n}/{len(plan)} ({target}), attempt {attempt}")
             t0 = time.monotonic()
@@ -451,6 +467,10 @@ def generate_questions(topic, difficulty="mixed", language="python", count=3, cu
                     break
             except retrieval.RetrievalError as exc:
                 rejected.append({**report, "stage": "embedding", "detail": str(exc)})
+                break
+            except Exception as exc:  # one bad candidate must not lose the questions already accepted
+                logger.exception("Unexpected error validating a generated question")
+                rejected.append({**report, "stage": "internal", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"})
                 break
     return {
         "accepted": accepted,

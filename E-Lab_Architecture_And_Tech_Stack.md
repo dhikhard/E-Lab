@@ -65,17 +65,15 @@ To assist students without giving away the answers, PRAXIS implements a 3-tier p
    - Simultaneously, it queues a Celery background task (`generate_llm_hint_task`) to call Ollama. Once Ollama finishes, it overrides the cache with the high-quality LLM response for future requests.
 4. **Sanitization (`_sanitize_hint`):** The LLM output is heavily scrubbed using Regex to remove any accidental markdown code blocks or C/Python keywords before being stored in the database.
 
-### 3.3 Offline Question Generator (RAG) (`core/rag_agent.py`)
-Faculty can generate custom, high-quality questions without internet access.
+### 3.3 Question Generator (RAG + local LLM) (`core/rag/`)
+Faculty can generate questions without internet access; everything runs on the server's own Ollama (CPU).
 
 **How it works:**
-1. **Knowledge Base:** PRAXIS holds over 300 curated DSA problems in `data/DSA_Topics/` as markdown files.
-2. **Embeddings & ChromaDB:** Using `sentence-transformers`, the markdown files are chunked and embedded into a local ChromaDB vector database.
-3. **Retrieval & Adaptation (`generate_question`):** 
-   - When faculty request a topic (e.g., "Dynamic Programming", "Medium"), the script retrieves the Top 5 semantically similar problems from ChromaDB.
-   - A deterministic adaptation script (no LLM required) alters the problem. It adjusts constraints based on the requested difficulty, manipulates the title (e.g., prepending "Optimized" or "Advanced"), formats a new problem description, and injects starter code.
-   - It synthesizes new edge-case test combinations from the reference problem and standard generic boundary values.
-4. **Result:** A fully formed Django `Question` object is created and bound to the module with 5-8 test cases.
+1. **Knowledge Base:** curated DSA notes in `data/DSA_Topics/` plus material faculty upload (.md/.txt/.pdf) are chunked and embedded with `nomic-embed-text` via the local Ollama (`manage.py rag_index`).
+2. **Retrieval:** a request (topic, difficulty, language, optional note or uploaded document) retrieves the top source chunks with hybrid semantic + lexical search.
+3. **Generation:** a Celery job on the `llm` queue asks the local model (`QUESTION_GEN_MODEL`, default `qwen3.5:4b`) for one schema-constrained JSON exercise per question: statement, formats, constraints, starter code, reference solution, tests and citations.
+4. **Validation:** a candidate is kept only if its citations are real and grounded, it isn't a copy of the source or a near-duplicate of an existing question, the code is in the requested language, and the reference solution reproduces the worked samples in the Docker sandbox. One retry with the failure fed back is allowed; jobs stop within their time budget and keep what passed.
+5. **Result:** faculty review the accepted questions and save them; they are created inactive until approved.
 
 ### 3.4 User-Friendly Proctoring System
 PRAXIS enforces fair assessment environments without punishing students for trivial actions.

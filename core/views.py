@@ -3079,7 +3079,7 @@ def faculty_quiz_questions(request, quiz_id):
 
 from django.http import JsonResponse
 from django.utils.text import slugify
-from .rag_agent import RAGQuestionAgent
+from .rag.retrieval import CORPUS_DIR as RAG_CORPUS_DIR, _topic_from_dir as rag_topic_from_dir
 
 
 def _parse_agent_request_data(request):
@@ -3119,7 +3119,10 @@ def faculty_agent_topics_api(request):
     )
     topics = sorted(
         {t.title() for t in RagDocument.objects.filter(source=RagDocument.Source.CORPUS).values_list("topic", flat=True) if t}
-    ) or RAGQuestionAgent.get_instance().list_topics()
+    ) or (  # index not built yet: list the bundled corpus folders
+        sorted(rag_topic_from_dir(d.name).title() for d in RAG_CORPUS_DIR.iterdir() if d.is_dir())
+        if RAG_CORPUS_DIR.is_dir() else []
+    )
     uploads = list(
         RagDocument.objects.filter(source=RagDocument.Source.UPLOAD, uploaded_by=request.user)
         .order_by("-created_at")
@@ -3135,6 +3138,20 @@ def faculty_agent_topics_api(request):
 
 
 GENERATION_JOBS_PER_DAY = 30
+# A job still "running" after the task's hard time limit, or "queued" this long,
+# was lost (worker restarted/killed). Left alone it would block new jobs forever.
+STALE_RUNNING_JOB = datetime.timedelta(seconds=3660 + 300)
+STALE_QUEUED_JOB = datetime.timedelta(hours=6)
+
+
+def _expire_stale_jobs(jobs):
+    now = timezone.now()
+    stale = jobs.filter(
+        Q(status=GenerationJob.Status.RUNNING, started_at__lt=now - STALE_RUNNING_JOB)
+        | Q(status=GenerationJob.Status.QUEUED, created_at__lt=now - STALE_QUEUED_JOB)
+    )
+    stale.update(status=GenerationJob.Status.FAILED, finished_at=now, progress="",
+                 error="Generation did not finish (the generation worker was restarted or unavailable). Please try again.")
 
 
 @login_required
@@ -3170,6 +3187,7 @@ def faculty_agent_generate_api(request):
     if language not in RAG_LANGUAGE_NAMES:
         return JsonResponse({"error": "Invalid language"}, status=400)
 
+    _expire_stale_jobs(GenerationJob.objects.filter(created_by=request.user))
     active = GenerationJob.objects.filter(
         created_by=request.user, status__in=[GenerationJob.Status.QUEUED, GenerationJob.Status.RUNNING]
     ).first()
@@ -3214,6 +3232,8 @@ def faculty_agent_job_api(request, job_id):
     job = get_object_or_404(GenerationJob, pk=job_id)
     if job.created_by_id != request.user.pk and not request.user.is_hod:
         raise PermissionDenied
+    _expire_stale_jobs(GenerationJob.objects.filter(pk=job.pk))
+    job.refresh_from_db()
     result = job.result or {}
     saved = result.get("saved", {})
     return JsonResponse({
@@ -3290,128 +3310,11 @@ def faculty_agent_add_question_api(request):
 
     data = _parse_agent_request_data(request)
 
-    if data.get("job_id") is not None:
-        return _add_question_from_job(request, data)
-
-    module_id = data.get("module_id")
-    title = str(data.get("title", "")).strip()
-    description = str(data.get("description", "")).strip()
-    
-    # Remove markdown asterisks, hashes, and code block ticks from description for readability
-    import re
-    description = description.replace('**', '')
-    description = re.sub(r'^#+\s+', '', description, flags=re.MULTILINE)
-    description = description.replace('`', '')
-    
-    difficulty = str(data.get("difficulty", Question.Difficulty.MEDIUM)).lower()
-    import re
-    def clean_md(text):
-        if not text: return ""
-        text = re.sub(r'^```[a-zA-Z]*\n', '', str(text).strip())
-        text = re.sub(r'\n```$', '', text)
-        return text.replace('```', '').strip()
-
-    def clean_io(text):
-        if not text: return ""
-        text = clean_md(text)
-        # Strip markdown bold markers
-        text = re.sub(r'\*+\s*', '', text)
-        text = re.sub(r'\s*\*+', '', text)
-        return text.strip()
-
-    starter_code = clean_md(data.get("starter_code", ""))
-    test_cases_data = data.get("test_cases", [])
-
-    if module_id is None or module_id == "" or not title or not description:
-        return JsonResponse({"error": "Module, title, and description are required", "received_keys": list(data.keys())}, status=400)
-
-    try:
-        module = Module.objects.get(pk=int(module_id))
-    except (Module.DoesNotExist, ValueError, TypeError):
-        return JsonResponse({"error": f"Invalid module_id: {module_id}"}, status=400)
-
-    # Generate unique slug for module
-    base_slug = slugify(title) or "question"
-    slug = base_slug
-    counter = 1
-    while Question.objects.filter(module=module, slug=slug).exists():
-        slug = f"{base_slug}-{counter}"
-        counter += 1
-
-    valid_difficulty = (
-        difficulty if difficulty in [Question.Difficulty.EASY, Question.Difficulty.MEDIUM, Question.Difficulty.HARD]
-        else Question.Difficulty.MEDIUM
-    )
-
-    # Extract sample input/output from first testcase if available
-    sample_input = ""
-    sample_output = ""
-    if isinstance(test_cases_data, list):
-        for tc in test_cases_data:
-            if isinstance(tc, dict) and tc.get("is_sample"):
-                sample_input = clean_io(tc.get("input", ""))
-                sample_output = clean_io(tc.get("expected_output", ""))
-                break
-
-    # Default starter code for C if blank
-    if not starter_code:
-        starter_code = "#include <stdio.h>\n\nint main() {\n    // Write your code here\n    return 0;\n}"
-
-    # Determine language from module category
-    lang_id = 50  # C default
-    if module.category == "python_programming":
-        lang_id = 71
-    elif module.category in ("placement_training", "advanced_placement_training"):
-        lang_id = 71
-    elif module.category == "cpp_programming":
-        lang_id = 54
-    elif module.category == "java_programming":
-        lang_id = 62
-
-    question = Question.objects.create(
-        module=module,
-        title=title,
-        slug=slug,
-        description=description,
-        difficulty=valid_difficulty,
-        sample_input=sample_input,
-        sample_output=sample_output,
-        starter_code=starter_code,
-        language_id=lang_id,
-        created_by=request.user,
-        is_mandatory=False,
-        # Generated questions need faculty review before students see them.
-        is_active=False
-    )
-
-    # Add Test Cases
-    if isinstance(test_cases_data, list):
-        for index, tc in enumerate(test_cases_data, 1):
-            if not isinstance(tc, dict):
-                continue
-            stdin_val = clean_io(tc.get("input", ""))
-            expected_val = clean_io(tc.get("expected_output", ""))
-            is_samp = bool(tc.get("is_sample", False))
-            
-            TestCase.objects.create(
-                question=question,
-                stdin=stdin_val,
-                expected_output=expected_val,
-                is_sample=is_samp,
-                order=index
-            )
-
-    from django.urls import reverse
-    url = reverse("question_detail", args=[question.pk])
-    edit_url = reverse("faculty_question_edit", args=[question.pk])
-
-    return JsonResponse({
-        "success": True,
-        "message": f"Question '{question.title}' saved to {module.name} as inactive. Review it and activate it when ready.",
-        "question_id": question.pk,
-        "question_url": url,
-        "edit_url": edit_url,
-    })
+    if data.get("job_id") is None:
+        # Only questions produced and validated by the local-LLM generation job can be
+        # saved here; client-supplied question text/tests are never trusted.
+        return JsonResponse({"error": "Generate a question first, then save it from the generation job."}, status=400)
+    return _add_question_from_job(request, data)
 
 
 def _add_question_from_job(request, data):
@@ -3528,152 +3431,3 @@ def faculty_generate_question(request):
     # Agent drawer, available on every faculty page.
     messages.info(request, "Use the AI Question Agent button (bottom right) to generate questions.")
     return redirect("faculty_question_bank")
-
-    # Get modules the faculty manages
-    modules = get_faculty_modules(request.user).filter(is_active=True).order_by("order")
-    
-    # Get available topics from RAG agent
-    agent = RAGQuestionAgent.get_instance()
-    available_topics = agent.list_topics()
-    
-    context = {
-        "modules": modules,
-        "topics": available_topics,
-        "difficulties": Question.Difficulty.choices,
-    }
-    
-    if request.method == "POST":
-        action = request.POST.get("action")
-        
-        if action == "generate":
-            # Generate preview
-            topic = request.POST.get("topic", "").strip()
-            difficulty = request.POST.get("difficulty", "medium").strip()
-            custom_prompt = request.POST.get("custom_prompt", "").strip()
-            
-            if not topic:
-                messages.error(request, "Topic is required.")
-                return render(request, "faculty/generate_question.html", context)
-            
-            try:
-                agent = RAGQuestionAgent.get_instance()
-                result, references = agent.generate_question(topic, difficulty, custom_prompt)
-                
-                context.update({
-                    "preview_question": result,
-                    "references": references,
-                    "selected_topic": topic,
-                    "selected_difficulty": difficulty,
-                    "selected_custom_prompt": custom_prompt,
-                    "selected_module_id": request.POST.get("module_id"),
-                })
-                messages.success(request, "Question generated successfully. Review and save.")
-            except Exception as e:
-                messages.error(request, f"Generation failed: {e}")
-        
-        elif action == "save":
-            # Save to database
-            module_id = request.POST.get("module_id")
-            title = request.POST.get("title", "").strip()
-            description = request.POST.get("description", "").strip()
-            difficulty = request.POST.get("difficulty", "medium").strip()
-            starter_code = request.POST.get("starter_code", "").strip()
-            test_cases_json = request.POST.get("test_cases_json", "[]")
-            
-            if not module_id or not title or not description:
-                messages.error(request, "Module, title, and description are required.")
-                return render(request, "faculty/generate_question.html", context)
-            
-            try:
-                module = Module.objects.get(pk=int(module_id))
-                # Verify faculty has access to this module
-                if module not in modules:
-                    messages.error(request, "You don't have permission to add questions to this module.")
-                    return render(request, "faculty/generate_question.html", context)
-            except (Module.DoesNotExist, ValueError, TypeError):
-                messages.error(request, "Invalid module.")
-                return render(request, "faculty/generate_question.html", context)
-            
-            # Parse test cases
-            try:
-                test_cases_data = json.loads(test_cases_json)
-            except json.JSONDecodeError:
-                test_cases_data = []
-            
-            # Save question
-            from django.utils.text import slugify
-            base_slug = slugify(title) or "question"
-            slug = base_slug
-            counter = 1
-            while Question.objects.filter(module=module, slug=slug).exists():
-                slug = f"{base_slug}-{counter}"
-                counter += 1
-            
-            valid_difficulty = difficulty if difficulty in dict(Question.Difficulty.choices) else Question.Difficulty.MEDIUM
-            
-            # Extract sample from first test case
-            sample_input = ""
-            sample_output = ""
-            if isinstance(test_cases_data, list):
-                for tc in test_cases_data:
-                    if isinstance(tc, dict) and tc.get("is_sample"):
-                        sample_input = str(tc.get("input", ""))
-                        sample_output = str(tc.get("expected_output", ""))
-                        break
-            
-            # Default starter code
-            if not starter_code:
-                starter_code = "#include <stdio.h>\n\nint main(void)\n{\n    /* Read from stdin. Do not print prompts unless required. */\n    return 0;\n}"
-
-            # Determine language from module category
-            lang_id = 50
-            if module.category == "python_programming":
-                lang_id = 71
-            elif module.category in ("placement_training", "advanced_placement_training"):
-                lang_id = 71
-            elif module.category == "cpp_programming":
-                lang_id = 54
-            elif module.category == "java_programming":
-                lang_id = 62
-
-            question = Question.objects.create(
-                module=module,
-                title=title,
-                slug=slug,
-                description=description,
-                difficulty=valid_difficulty,
-                sample_input=sample_input,
-                sample_output=sample_output,
-                starter_code=starter_code,
-                language_id=lang_id,
-                created_by=request.user,
-                is_mandatory=True,
-                is_active=True
-            )
-            
-            # Add Test Cases
-            for index, tc in enumerate(test_cases_data, 1):
-                if not isinstance(tc, dict):
-                    continue
-                stdin_val = str(tc.get("input", ""))
-                expected_val = str(tc.get("expected_output", ""))
-                is_samp = bool(tc.get("is_sample", index == 1))
-                
-                TestCase.objects.create(
-                    question=question,
-                    stdin=stdin_val,
-                    expected_output=expected_val,
-                    is_sample=is_samp,
-                    order=index
-                )
-            
-            messages.success(request, f"Question '{question.title}' saved to {module.name}!")
-            return redirect("faculty_generate_question")
-    
-    return render(request, "faculty/generate_question.html", context)
-
-
-
-
-
-
