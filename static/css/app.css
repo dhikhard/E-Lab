@@ -2632,6 +2632,35 @@ th {
   margin: 0;
 }
 
+.results-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.results-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.results-actions .secondary,
+.focus-dashboard-link {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  align-items: center;
+  text-decoration: none;
+}
+
 .results-status {
   font-size: 14px;
   font-weight: 600;

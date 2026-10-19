@@ -156,3 +156,41 @@ class FocusModeProctoringBrowserTests(StaticLiveServerTestCase):
             self.assertNotIn("is-maximized-page", body.get_attribute("class"))
         finally:
             context.close()
+
+    def test_results_reachable_in_focus_mode_and_dashboard_leaves_without_violation(self):
+        q = self._question(proctored=True)
+        context, page, calls = self._open(q)
+        tests = '[{"passed": false, "stdin": "1 2", "expected": "3", "actual": "0"}]'
+        page.route("**/api/run/", lambda route: route.fulfill(status=200, content_type="application/json",
+                                                               body='{"tests": %s}' % tests))
+        try:
+            page.click("#take-me-to-question-btn")
+            page.wait_for_function("document.fullscreenElement !== null", timeout=5000)
+            page.locator(".monaco-editor .view-lines").click()  # focus mode
+            self.assertTrue(page.locator("#editor-dashboard-link").is_visible())
+
+            # Results of a run/submit scroll into view instead of rendering off-screen.
+            page.click("[data-run-button]")
+            page.wait_for_selector("#test-results", state="visible")
+            page.wait_for_timeout(1000)  # smooth scroll
+            top = page.evaluate("document.getElementById('test-results').getBoundingClientRect().top")
+            self.assertLess(top, 200)
+            self.assertEqual(page.evaluate("document.activeElement.id"), "results-title")
+
+            page.click("#results-back-to-editor")
+            page.wait_for_timeout(1000)
+            self.assertLess(page.evaluate("document.getElementById('editor-chrome-container').getBoundingClientRect().top"), 200)
+
+            # The mouse wheel over the editor reaches the results again.
+            page.mouse.move(640, 400)
+            page.mouse.wheel(0, 3000)
+            page.wait_for_timeout(800)
+            self.assertGreater(page.evaluate("document.querySelector('.submit-panel-wide').scrollTop"), 300)
+
+            page.locator(".results-actions a[data-leave-question]").click()
+            page.wait_for_url(f"{self.live_server_url}/", timeout=10000)
+            page.wait_for_timeout(500)
+            self.assertEqual(calls["violation"], [], "leaving via Dashboard must not report a violation")
+            self.assertEqual(ProctoringEvent.objects.filter(kind="violation").count(), 0)
+        finally:
+            context.close()

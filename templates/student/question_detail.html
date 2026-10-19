@@ -321,7 +321,7 @@
       <svg class="icon-minimize" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><path d="M8 3v3a2 2 0 0 1-2 2H3"></path><path d="M21 8h-3a2 2 0 0 1-2-2V3"></path><path d="M3 16h3a2 2 0 0 1-2 2v3"></path></svg>
       <span class="max-text">Focus mode</span>
     </button>
-    <a class="back-button as-link" href="{% url 'module_detail' display_question.module.id %}">Back</a>
+    <a class="back-button as-link" href="{% url 'module_detail' display_question.module.id %}" data-leave-question>Back</a>
   </div>
 </section>
 
@@ -522,6 +522,9 @@
         <button type="button" class="secondary" id="editor-minimize-btn" title="Return to the normal page (Esc)" aria-keyshortcuts="Escape" style="display: none; height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-sm);">
           Exit focus mode
         </button>
+        <a class="secondary focus-dashboard-link" id="editor-dashboard-link" href="{% url 'dashboard' %}" data-leave-question title="Leave this question and go to your dashboard" style="display: none;">
+          Dashboard
+        </a>
       </div>
     </div>
 
@@ -595,8 +598,14 @@
     <!-- Test Results -->
     <div class="test-results" id="test-results" style="display: none; margin-top: 24px;">
       <div class="results-header">
-        <h3 class="results-title">Test Results</h3>
-        <span class="results-status" id="results-status"></span>
+        <div class="results-heading">
+          <h3 class="results-title" id="results-title" tabindex="-1">Test Results</h3>
+          <span class="results-status" id="results-status"></span>
+        </div>
+        <div class="results-actions">
+          <button type="button" class="secondary" id="results-back-to-editor">↑ Back to editor</button>
+          <a class="secondary" href="{% url 'dashboard' %}" data-leave-question>Go to dashboard</a>
+        </div>
       </div>
       <div class="results-list" id="results-list"></div>
     </div>
@@ -855,6 +864,10 @@ public class Main {
         lineNumbers: "on",
         renderLineHighlight: "all",
         scrollBeyondLastLine: false,
+        // Let the wheel scroll the page/focus panel once the editor can't
+        // scroll further; otherwise results below a full-height editor are
+        // unreachable with the mouse.
+        scrollbar: { alwaysConsumeMouseWheel: false },
         bracketPairColorization: { enabled: true },
         autoClosingBrackets: "always",
         autoClosingQuotes: "always",
@@ -1031,6 +1044,27 @@ public class Main {
 
       resultsStatus.textContent = allPassed ? "All Test Cases Passed" : "Some Test Cases Failed";
       resultsStatus.className = "results-status " + (allPassed ? "success" : "error");
+      revealResults();
+    }
+
+    // Bring finished results into view. In focus mode the editor fills the
+    // screen, so without this the results render out of sight.
+    function revealResults() {
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      testResultsDiv.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      const title = document.getElementById("results-title");
+      if (title) title.focus({ preventScroll: true });
+    }
+
+    const backToEditorBtn = document.getElementById("results-back-to-editor");
+    if (backToEditorBtn) {
+      backToEditorBtn.addEventListener("click", function() {
+        const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const target = document.getElementById("editor-chrome-container");
+        // Focus first: focusing Monaco scrolls instantly and would cut a smooth scroll short.
+        if (typeof editor !== "undefined" && editor) editor.focus();
+        (target && target.offsetParent ? target : submitForm).scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      });
     }
 
     let isSubmitting = false;
@@ -2385,6 +2419,7 @@ public class Main {
         if (els.maxText) els.maxText.textContent = focus ? "Exit focus mode" : "Focus mode";
       }
       if (els.exitBtn) els.exitBtn.style.display = focus ? "inline-flex" : "none";
+      if (els.dashLink) els.dashLink.style.display = focus ? "inline-flex" : "none";
       if (els.descBtn) {
         els.descBtn.style.display = focus ? "inline-flex" : "none";
         els.descBtn.setAttribute("aria-pressed", open ? "true" : "false");
@@ -2449,6 +2484,25 @@ public class Main {
       }
     };
 
+    // Leaving through the page's own links (Back / Dashboard) is not a
+    // violation: stop monitoring before the unload hides the page and exits
+    // fullscreen. Modified clicks open a new tab and keep this page, so they
+    // are left alone. Coming back via the back/forward cache resumes it.
+    document.addEventListener("click", function(e) {
+      const link = e.target.closest && e.target.closest("a[data-leave-question]");
+      if (!link || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      if (window.proctoringMonitoringActive) {
+        window.proctoringMonitoringActive = false;
+        window._proctoringPausedForLeave = true;
+      }
+    });
+    window.addEventListener("pageshow", function(e) {
+      if (e.persisted && window._proctoringPausedForLeave) {
+        window._proctoringPausedForLeave = false;
+        window.proctoringMonitoringActive = true;
+      }
+    });
+
     window.toggleMaximize = function() {
       if (isFocus()) window.exitFocusMode(); else window.enterFocusMode();
     };
@@ -2511,6 +2565,7 @@ public class Main {
     function wire() {
       els.maxBtn = q("editor-maximize-btn");
       els.exitBtn = q("editor-minimize-btn");
+      els.dashLink = q("editor-dashboard-link");
       els.descBtn = q("editor-toggle-desc-btn");
       els.descLabel = els.descBtn ? els.descBtn.querySelector(".desc-label") : null;
       els.toast = q("fullscreen-toast");
