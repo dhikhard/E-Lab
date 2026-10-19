@@ -107,7 +107,7 @@ def _normalise(text):
 
 # ── Prompt ────────────────────────────────────────────────────────────────
 
-def build_messages(chunks, topic, difficulty, language, custom_prompt=""):
+def build_messages(chunks, topic, difficulty, language, custom_prompt="", module_context=""):
     lang = LANGUAGE_NAMES[language]
     sources = "\n\n".join(f'<source id="{c.ref}" title="{c.document.title}">\n{c.text}\n</source>' for c in chunks)
     system = (
@@ -133,7 +133,9 @@ def build_messages(chunks, topic, difficulty, language, custom_prompt=""):
         "Reply with a single JSON object matching the schema."
     )
     user = (
-        f"Topic: {topic}\nTarget difficulty: {difficulty}\nLanguage: {lang}\n"
+        (f"Lab module (data): <module>{module_context[:200]}</module> — the exercise must fit what this module teaches.\n"
+         if module_context else "")
+        + f"Topic: {topic}\nTarget difficulty: {difficulty}\nLanguage: {lang}\n"
         + (f"Faculty note (data): <note>{custom_prompt[:500]}</note>\n" if custom_prompt else "")
         + f"\n{sources}\n\nWrite one new {difficulty} exercise in {lang} based on these sources."
     )
@@ -387,7 +389,7 @@ def difficulty_plan(difficulty, count):
 
 
 def generate_questions(topic, difficulty="mixed", language="python", count=3, custom_prompt="",
-                       document_ids=None, progress=None, runner=run_code, deadline=None):
+                       document_ids=None, progress=None, runner=run_code, deadline=None, module_context=""):
     """
     Returns {"accepted": [...], "rejected": [...], "sources": [...], "timings": {...}}.
     Raises retrieval.RetrievalError if no source material is available.
@@ -409,7 +411,7 @@ def generate_questions(topic, difficulty="mixed", language="python", count=3, cu
     for n, target in enumerate(plan, 1):
         if out_of_time:
             break
-        messages = build_messages(chunks, topic, target, language, custom_prompt)
+        messages = build_messages(chunks, topic, target, language, custom_prompt, module_context)
         if accepted:
             messages[-1]["content"] += "\nAlready written in this batch (write something different): " + \
                 "; ".join(a["title"] for a in accepted)

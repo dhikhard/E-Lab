@@ -3106,17 +3106,41 @@ def _parse_agent_request_data(request):
 
 
 
+# Module-first generation: a module's category fixes the language of every
+# question generated for it, so a C module can't receive Python questions.
+MODULE_CATEGORY_LANGUAGE = {
+    "python_programming": "python",
+    "placement_training": "python",
+    "advanced_placement_training": "python",
+    "cpp_programming": "cpp",
+    "java_programming": "java",
+    "c_programming": "c",
+}
+UNSUPPORTED_GENERATION_CATEGORIES = {"dbms_module"}  # SQL can't be generated/validated by this pipeline
+
+
+def module_generation_language(module):
+    """Language for generated questions in `module`, or None if generation isn't supported there."""
+    if module.category in UNSUPPORTED_GENERATION_CATEGORIES:
+        return None
+    return MODULE_CATEGORY_LANGUAGE.get(module.category, "c")
+
+
 @login_required
 def faculty_agent_topics_api(request):
     """Return modules, corpus topics and this faculty member's uploaded sources for the agent drawer."""
     if not request.user.is_faculty_like:
         return JsonResponse({"error": "Faculty access required"}, status=403)
 
-    modules = list(
-        Module.objects.filter(is_active=True)
-        .select_related("course")
-        .values("id", "name", "level", "course__name")
-    )
+    modules = []
+    for m in get_faculty_modules(request.user).select_related("course").order_by("course__name", "order", "name"):
+        modules.append({
+            "id": m.id,
+            "name": m.name,
+            "level": m.level,
+            "course__name": m.course.name if m.course else "",
+            "language": module_generation_language(m),  # None: generation not supported (e.g. SQL)
+        })
     topics = sorted(
         {t.title() for t in RagDocument.objects.filter(source=RagDocument.Source.CORPUS).values_list("topic", flat=True) if t}
     ) or (  # index not built yet: list the bundled corpus folders
@@ -3162,9 +3186,16 @@ def faculty_agent_generate_api(request):
         return JsonResponse({"error": "Faculty access required"}, status=403)
 
     data = _parse_agent_request_data(request)
+    try:
+        module = get_faculty_modules(request.user).select_related("course").get(pk=int(data.get("module_id")))
+    except (Module.DoesNotExist, TypeError, ValueError):
+        return JsonResponse({"error": "Choose one of your modules first."}, status=400)
+    # The module decides the language; the client's choice is not trusted.
+    language = module_generation_language(module)
+    if language is None:
+        return JsonResponse({"error": f"Question generation isn't available for {module.name} (SQL/DBMS modules)."}, status=400)
     topic = str(data.get("topic", "")).strip()[:120]
     difficulty = str(data.get("difficulty", "mixed")).strip().lower()
-    language = str(data.get("language", "python")).strip().lower()
     custom_prompt = str(data.get("prompt", "")).strip()[:500]
     try:
         count = max(1, min(3, int(data.get("count", 1))))
@@ -3179,13 +3210,10 @@ def faculty_agent_generate_api(request):
             return JsonResponse({"error": "Unknown study material"}, status=400)
         document_ids = [doc.pk]
         topic = topic or doc.topic or doc.title
+    topic = topic or module.name[:120]  # default: generate for what the module teaches
 
-    if not topic:
-        return JsonResponse({"error": "Topic is required"}, status=400)
     if difficulty not in ("easy", "medium", "hard", "mixed"):
         return JsonResponse({"error": "Invalid difficulty"}, status=400)
-    if language not in RAG_LANGUAGE_NAMES:
-        return JsonResponse({"error": "Invalid language"}, status=400)
 
     _expire_stale_jobs(GenerationJob.objects.filter(created_by=request.user))
     active = GenerationJob.objects.filter(
@@ -3200,10 +3228,13 @@ def faculty_agent_generate_api(request):
     job = GenerationJob.objects.create(
         created_by=request.user,
         params={"topic": topic, "difficulty": difficulty, "language": language, "count": count,
-                "prompt": custom_prompt, "document_ids": document_ids},
+                "prompt": custom_prompt, "document_ids": document_ids,
+                "module_id": module.pk, "module_name": module.name,
+                "course_name": module.course.name if module.course else ""},
     )
     generate_questions_task.delay(job.pk)
-    return JsonResponse({"success": True, "job_id": job.pk, "status": job.status}, status=202)
+    return JsonResponse({"success": True, "job_id": job.pk, "status": job.status, "language": language,
+                         "topic": topic, "module": {"id": module.pk, "name": module.name}}, status=202)
 
 
 def _job_question_payload(q, index, saved):
@@ -3249,6 +3280,8 @@ def faculty_agent_job_api(request, job_id):
         "sources": result.get("sources", []),
         "model": result.get("model"),
         "timings": result.get("timings"),
+        "module": {"id": job.params.get("module_id"), "name": job.params.get("module_name")},
+        "language": job.params.get("language"),
     })
 
 
@@ -3323,7 +3356,10 @@ def _add_question_from_job(request, data):
     try:
         index = int(data.get("index", 0))
         q = job.result["accepted"][index]
-        module = Module.objects.get(pk=int(data.get("module_id")))
+        # Module-first jobs save into the module they were generated for; older jobs
+        # (no module in params) still take the module chosen at save time.
+        module_id = job.params.get("module_id") or data.get("module_id")
+        module = get_faculty_modules(request.user).get(pk=int(module_id))
     except (KeyError, IndexError, TypeError, ValueError, Module.DoesNotExist):
         return JsonResponse({"error": "Invalid job question or module"}, status=400)
     saved = job.result.setdefault("saved", {})

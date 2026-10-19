@@ -310,6 +310,18 @@ class GenerationPipelineTests(TestCase):
         self.assertEqual(len(result["accepted"]), 1)
         self.assertEqual(result["rejected"][-1]["stage"], "internal")
 
+    def test_module_context_reaches_the_prompt(self, _e):
+        calls = []
+
+        def fake(messages):
+            calls.append(messages)
+            return (json.dumps(good_candidate(self.ref)), {})
+
+        with patch("core.rag.generate._call_model", side_effect=fake):
+            generate.generate_questions("stack", difficulty="easy", language="python", count=1, runner=python_runner,
+                                        module_context="Data Structures / Stacks")
+        self.assertIn("<module>Data Structures / Stacks</module>", calls[0][1]["content"])
+
     def test_citations_must_be_a_list(self, _e):
         cand = good_candidate(self.ref)
         cand["citations"] = self.ref
@@ -330,20 +342,56 @@ class AgentApiTests(TestCase):
         self.module = Module.objects.create(name="Stacks")
         self.client.force_login(self.fac)
 
+    def generate(self, **body):
+        body.setdefault("module_id", self.module.pk)
+        return self.client.post("/api/faculty-agent/generate/", data=json.dumps(body), content_type="application/json")
+
     @patch("core.views.generate_questions_task.delay")
     def test_generate_queues_job_and_limits_concurrency(self, delay):
-        r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack", "language": "python"}),
-                             content_type="application/json")
+        r = self.generate(topic="stack")
         self.assertEqual(r.status_code, 202)
         delay.assert_called_once_with(r.json()["job_id"])
-        again = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack"}),
-                                 content_type="application/json")
-        self.assertEqual(again.status_code, 429)
+        self.assertEqual(self.generate(topic="stack").status_code, 429)
 
     def test_generate_validates_input(self):
-        for body in ({"topic": ""}, {"topic": "x", "language": "rust"}, {"topic": "x", "difficulty": "insane"}):
-            r = self.client.post("/api/faculty-agent/generate/", data=json.dumps(body), content_type="application/json")
+        for body in ({"module_id": None}, {"module_id": 999999}, {"topic": "x", "difficulty": "insane"}):
+            r = self.generate(**body)
             self.assertEqual(r.status_code, 400, body)
+
+    @patch("core.views.generate_questions_task.delay")
+    def test_module_decides_language_and_default_topic(self, _delay):
+        java = Module.objects.create(name="Java Collections", category="java_programming")
+        r = self.generate(module_id=java.pk, language="python")  # client language is ignored
+        self.assertEqual(r.status_code, 202, r.content)
+        job = GenerationJob.objects.get(pk=r.json()["job_id"])
+        self.assertEqual(job.params["language"], "java")
+        self.assertEqual(job.params["topic"], "Java Collections")
+        self.assertEqual(job.params["module_id"], java.pk)
+        self.assertEqual(self.client.get(f"/api/faculty-agent/jobs/{job.pk}/").json()["module"]["name"], "Java Collections")
+
+    def test_sql_modules_are_refused(self):
+        dbms = Module.objects.create(name="SQL Joins", category="dbms_module")
+        self.assertEqual(self.generate(module_id=dbms.pk).status_code, 400)
+        langs = {m["name"]: m["language"] for m in self.client.get("/api/faculty-agent/topics/").json()["modules"]}
+        self.assertIsNone(langs["SQL Joins"])
+        self.assertEqual(langs["Stacks"], "c")
+
+    def test_faculty_only_generate_for_their_modules(self):
+        from .models import Course
+        mine = Course.objects.create(name="Mine", slug="mine")
+        self.fac.managed_courses.add(mine)
+        Module.objects.create(name="Owned", course=mine)
+        self.assertEqual(self.generate().status_code, 400)  # self.module isn't in a managed course
+
+    def test_module_first_job_saves_into_its_own_module(self):
+        other = Module.objects.create(name="Other")
+        job = self._done_job()
+        job.params.update(module_id=self.module.pk, module_name=self.module.name)
+        job.save()
+        r = self.client.post("/api/faculty-agent/add-question/", data=json.dumps(
+            {"job_id": job.pk, "index": 0, "module_id": other.pk}), content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Question.objects.get(pk=r.json()["question_id"]).module, self.module)
 
     def _done_job(self, owner=None):
         return GenerationJob.objects.create(
@@ -380,7 +428,7 @@ class AgentApiTests(TestCase):
     def test_students_cannot_use_agent(self):
         student = User.objects.create_user("st", password="pw", role=User.Role.STUDENT)
         self.client.force_login(student)
-        r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack"}), content_type="application/json")
+        r = self.generate(topic="stack")
         self.assertEqual(r.status_code, 403)
 
     def test_only_llm_job_questions_can_be_saved(self):
@@ -395,8 +443,7 @@ class AgentApiTests(TestCase):
         from django.utils import timezone
         stuck = GenerationJob.objects.create(created_by=self.fac, status=GenerationJob.Status.RUNNING,
                                              started_at=timezone.now() - datetime.timedelta(hours=3))
-        r = self.client.post("/api/faculty-agent/generate/", data=json.dumps({"topic": "stack", "language": "python"}),
-                             content_type="application/json")
+        r = self.generate(topic="stack")
         self.assertEqual(r.status_code, 202)
         stuck.refresh_from_db()
         self.assertEqual(stuck.status, GenerationJob.Status.FAILED)

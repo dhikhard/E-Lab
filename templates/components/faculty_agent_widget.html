@@ -24,7 +24,7 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
         <div class="agent-avatar">✨</div>
         <div>
           <h3 class="agent-title">Faculty RAG Agent</h3>
-          <p class="agent-subtitle">Generate & add lab questions on any topic</p>
+          <p class="agent-subtitle">Pick a module, then generate lab questions for it</p>
         </div>
       </div>
       <button id="faculty-agent-close" class="agent-close-btn" aria-label="Close Drawer">&times;</button>
@@ -35,7 +35,7 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
       <form id="agent-gen-form" onsubmit="return false;">
         <div class="agent-form-row">
           <div class="agent-form-field">
-            <label for="agent-module-select">Target Module</label>
+            <label for="agent-module-select">Module</label>
             <select id="agent-module-select" required>
               <option value="">-- Loading modules --</option>
             </select>
@@ -53,8 +53,8 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
 
         <div class="agent-form-row">
           <div class="agent-form-field">
-            <label for="agent-lang-select">Language</label>
-            <select id="agent-lang-select">
+            <label for="agent-lang-select">Language <small class="agent-subtitle">(set by the module)</small></label>
+            <select id="agent-lang-select" disabled aria-describedby="agent-lang-note">
               <option value="c">C</option>
               <option value="cpp">C++</option>
               <option value="python" selected>Python 3</option>
@@ -71,9 +71,11 @@ Faculty AI Agent Floating Widget - E-Lab RAG Question Generator
           </div>
         </div>
 
+        <small id="agent-lang-note" class="agent-subtitle" role="status" aria-live="polite" style="display: block; margin-bottom: 12px;"></small>
+
         <div class="agent-form-field">
-          <label for="agent-topic-input">Topic / Algorithm</label>
-          <input type="text" id="agent-topic-input" placeholder="e.g. Dynamic Programming, Two Pointers, BST" list="agent-topics-list" required />
+          <label for="agent-topic-input">Topic <small class="agent-subtitle">(optional, defaults to the module)</small></label>
+          <input type="text" id="agent-topic-input" placeholder="Defaults to the module name" list="agent-topics-list" />
           <datalist id="agent-topics-list"></datalist>
         </div>
 
@@ -229,16 +231,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/faculty-agent/topics/');
       if (res.ok) {
         const data = await res.json();
-        moduleSelect.innerHTML = '<option value="">Select Target Module</option>';
+        moduleSelect.innerHTML = '<option value="">Select a module</option>';
         data.modules.forEach(m => {
           const opt = document.createElement('option');
           opt.value = m.id;
-          opt.textContent = `${m.name} (${m.course__name || 'CS'})`;
+          opt.dataset.language = m.language || '';
+          opt.dataset.name = m.name;
+          opt.textContent = `${m.name} (${m.course__name || 'CS'})` + (m.language ? '' : ' — not supported (SQL)');
+          opt.disabled = !m.language;
           moduleSelect.appendChild(opt);
         });
-        if (data.modules.length > 0) {
-          moduleSelect.selectedIndex = 1;
-        }
+        const firstSupported = data.modules.findIndex(m => m.language);
+        if (firstSupported >= 0) moduleSelect.selectedIndex = firstSupported + 1;
+        syncModule();
 
         (data.uploads || []).forEach(u => {
           const opt = document.createElement('option');
@@ -261,6 +266,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Generation is an async job on the CPU LLM worker: queue, then poll ──
   const langSelect = document.getElementById('agent-lang-select');
+  const langNote = document.getElementById('agent-lang-note');
+  const LANGUAGE_LABELS = { c: 'C', cpp: 'C++', python: 'Python 3', java: 'Java' };
+
+  // Module first: the module fixes the language and is the default topic.
+  function syncModule() {
+    const opt = moduleSelect.selectedOptions[0];
+    const language = opt && opt.dataset.language;
+    if (language) {
+      langSelect.value = language;
+      langNote.textContent = `Questions for ${opt.dataset.name} are generated in ${LANGUAGE_LABELS[language] || language} and saved to that module.`;
+      topicInput.placeholder = `Defaults to “${opt.dataset.name}”`;
+    } else {
+      langNote.textContent = 'Choose a module to generate questions for.';
+      topicInput.placeholder = 'Defaults to the module name';
+    }
+  }
+  moduleSelect.addEventListener('change', syncModule);
   const countSelect = document.getElementById('agent-count-select');
   const sourceSelect = document.getElementById('agent-source-select');
   const uploadInput = document.getElementById('agent-upload-input');
@@ -293,7 +315,8 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadStatus.textContent = 'Uploading and indexing ' + file.name + '…';
     const fd = new FormData();
     fd.append('file', file);
-    fd.append('topic', topicInput.value.trim());
+    const modOpt = moduleSelect.selectedOptions[0];
+    fd.append('topic', topicInput.value.trim() || (modOpt && modOpt.dataset.name) || '');
     try {
       const res = await fetch('/api/faculty-agent/upload/', {
         method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') }, body: fd
@@ -314,7 +337,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   form.addEventListener('submit', async () => {
     const topic = topicInput.value.trim();
-    if (!topic && !sourceSelect.value) return;
+    if (!moduleSelect.value) {
+      showError('Choose a module first.');
+      moduleSelect.focus();
+      return;
+    }
 
     resultCard.classList.add('hidden');
     successBanner.classList.add('hidden');
@@ -328,8 +355,8 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
         body: JSON.stringify({
-          topic, difficulty: diffSelect.value, prompt: promptInput.value.trim(),
-          language: langSelect.value, count: countSelect.value,
+          module_id: moduleSelect.value, topic, difficulty: diffSelect.value, prompt: promptInput.value.trim(),
+          count: countSelect.value,
           document_id: sourceSelect.value || null
         })
       });
@@ -441,16 +468,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     addBtn.disabled = !!q.saved_question_id;
-    addBtn.textContent = q.saved_question_id ? '✓ Saved for review' : '🚀 Save for review (inactive)';
+    addBtn.textContent = q.saved_question_id ? '✓ Saved for review' : saveLabel();
     resultCard.classList.remove('hidden');
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     resultCard.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
   }
 
-  // Save the selected validated question (server uses its own stored copy)
+  function saveLabel() {
+    const name = currentJob && currentJob.module && currentJob.module.name;
+    return name ? `🚀 Save to ${name} for review (inactive)` : '🚀 Save for review (inactive)';
+  }
+
+  // Save the selected validated question (server uses its own stored copy and the
+  // job's module; module_id only matters for jobs created before module-first).
   addBtn.addEventListener('click', async () => {
     if (!currentGeneratedQuestion || !currentJob) return;
-    const moduleId = moduleSelect.value;
+    const moduleId = (currentJob.module && currentJob.module.id) || moduleSelect.value;
     if (!moduleId) {
       alert('Please select a target module first.');
       return;
@@ -475,12 +508,12 @@ document.addEventListener('DOMContentLoaded', () => {
         addBtn.textContent = '✓ Saved for review';
       } else {
         addBtn.disabled = false;
-        addBtn.textContent = '🚀 Save for review (inactive)';
+        addBtn.textContent = saveLabel();
         alert('Failed to save question: ' + (data.error || 'Unknown error'));
       }
     } catch (err) {
       addBtn.disabled = false;
-      addBtn.textContent = '🚀 Save for review (inactive)';
+      addBtn.textContent = saveLabel();
       alert('Network error while saving question.');
     }
   });

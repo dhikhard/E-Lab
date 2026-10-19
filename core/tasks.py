@@ -117,6 +117,7 @@ def generate_questions_task(job_id):
             document_ids=p.get("document_ids") or None,
             progress=progress,
             deadline=time.monotonic() + generate.JOB_TIME_BUDGET,
+            module_context=" / ".join(x for x in (p.get("course_name"), p.get("module_name")) if x),
         )
         job.result = result
         job.status = GenerationJob.Status.DONE
